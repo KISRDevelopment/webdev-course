@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+
+{% block title %}Presentation: {{ p['title'] }}{% endblock %}
+
+{% block content %}
+<ul>
+   <li><strong>Title:</strong> {{ p['title'] }}</li>
+   <li><strong>Presenter(s):</strong> {{ p['presenters'] }}</li>
+   <li><strong>Date and Time:</strong> {{ p['scheduled'] }} {{ p['time_range'] }}</li>
+  </ul>
+  
+<h2>Notes</h2>
+{{ p['notes']|safe }}
+  
+{% endblock %}

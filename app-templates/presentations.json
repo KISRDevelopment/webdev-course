@@ -1,0 +1,39 @@
+[
+    {
+        "id": 1,
+        "notes": "",
+        "presenters": "Mohammad",
+        "scheduled": "2018-05-21",
+        "time_range": "10-11am",
+        "title": "Dynamic Key-Value Memory Networks for Knowledge Tracing",
+        "attachments" : [
+            {
+                "id" : 1,
+                "title" : "Presentation"
+            }
+        ]
+    },
+    {
+        "id": 2,
+        "notes": "",
+        "presenters": "Dr. Ali Al-Hemoud",
+        "scheduled": "2018-05-30",
+        "time_range": "9:30-10am",
+        "title": "Comparison of Indoor Air Quality in Schools: Urban vs. Industrial 'Oil & Gas' Zones in Kuwait",
+        "attachments" : []
+    },
+    {
+        "id": 3,
+        "notes": "<a href=\"https://gist.github.com/mmkhajah/ae2b3421ec4bcb2bd3ecb9a2bf928cdb\">The problem with Figure 1</a>",
+        "presenters": "Muneera & Megha",
+        "scheduled": "2018-05-30",
+        "time_range": "10-11am",
+        "title": "Long-Term Spatiotemporal Analysis of Social Media for Device-to-Device Networks",
+        "attachments" : [
+            {
+                "id" : 1,
+                "title" : "Presentation"
+            }
+        ]
+    }
+]
