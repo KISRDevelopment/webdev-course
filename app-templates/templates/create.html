@@ -4,23 +4,31 @@
 
 {% block content %}
 
+{% if errors %}
+<ul class='form-errors'>
+ {% for e in errors %}
+  <li>{{ e }}</li>
+ {% endfor %}
+</ul>
+{% endif %}
+
 <form method="post">
 
 <dl>
     <dt><label for="title">Title</label></dt>
-    <dd><input name="title" required type="text" value=""/></dd>
+    <dd><input name="title" required type="text" value="{{ request.form['title'] }}"/></dd>
 
     <dt><label for="presenters">Presenter(s)</label></dt>
-    <dd><input name="presenters" required type="text" value=""/></dd>
+    <dd><input name="presenters" required type="text" value="{{ request.form['presenters'] }}"/></dd>
 
     <dt><label for="scheduled">Date</label></dt>
-    <dd><input name="scheduled" type="date" required value=""/></dd>
+    <dd><input name="scheduled" type="date" required value="{{ request.form['scheduled'] }}"/></dd>
 
     <dt><label for="time_range">Time</label></dt>
-    <dd><input name="time_range" type="text" required value=""/></dd>
+    <dd><input name="time_range" type="text" required value="{{ request.form['time_range'] }}"/></dd>
     
     <dt><label for="notes">Notes</label></dt>
-    <dd><textarea name="notes" cols="40" rows="5"></textarea></dd>
+    <dd><textarea name="notes" cols="40" rows="5">{{ request.form['notes'] }}</textarea></dd>
 </dl>
 
 <p><input type="submit" value="Add"/></p>

@@ -1,3 +1,6 @@
+# Intro to Web Development with Flask
+_By Mohammad Mahmoud Khajah (mmkhajah@kisr.edu.kw)_
+
 # Application Overview
 
 We will be developing a reading group application similar to the one I did for [SSDD's reading group](https://www.lambda-complex.com/ssdd/). The application will support the following features:
@@ -672,6 +675,96 @@ Now, retry creating a presentation. You should be redirected to `home` view and 
 > You may be wondering, why don't we just call the `home` function directly, rather than issue a redirect. We'd avoid dealing with sessions and cookies but consider what happens if you refresh the home page after submitting the form. The browser will prompt the user to "resend the data" because it thinks he or she are trying to refresh the form. By redirecting the browser, we are telling the client that the form submission is complete.
 
 # Validating Inputs
+
+We need to ensure that users are entering proper inputs into the forms (e.g., inputs are not too short, correct date format is provided, numbers are within range, etc.). While the browser can provide basic input validation, you should **never** rely on browser-side validation as it can easily be bypassed (even if you have a bit of custom Javascript that does validation on the client-side). All inputs must be validated on the server-side. 
+
+The input validation process is as follows:
+1. If the request is `POST`, validate the form inputs
+2. If there are errors during validation, re-display the form with the validation errors *and* the fields that have already been filled so that the user doesn't have to enter them again.
+3. If there are no errors, save and redirect as usual
+4. If the request is GET, display the form.
+
+So let's implement the necessary changes for this process:
+
+1. update the `content` block `create.html` as follows:
+```html
+{% if errors %}
+<ul class='form-errors'>
+ {% for e in errors %}
+  <li>{{ e }}</li>
+ {% endfor %}
+</ul>
+{% endif %}
+
+<form method="post">
+
+<dl>
+    <dt><label for="title">Title</label></dt>
+    <dd><input name="title" required type="text" value="{{ request.form['title'] }}"/></dd>
+
+    <dt><label for="presenters">Presenter(s)</label></dt>
+    <dd><input name="presenters" required type="text" value="{{ request.form['presenters'] }}"/></dd>
+
+    <dt><label for="scheduled">Date</label></dt>
+    <dd><input name="scheduled" type="date" required value="{{ request.form['scheduled'] }}"/></dd>
+
+    <dt><label for="time_range">Time</label></dt>
+    <dd><input name="time_range" type="text" required value="{{ request.form['time_range'] }}"/></dd>
+    
+    <dt><label for="notes">Notes</label></dt>
+    <dd><textarea name="notes" cols="40" rows="5">{{ request.form['notes'] }}</textarea></dd>
+</dl>
+
+<p><input type="submit" value="Add"/></p>
+
+</form>
+```
+We've added a block that lists any errors, and we've 
+pre-populated form inputs with request form values. The `request` object is another object that Flask makes available by default in the template's context.  Notice how we stripped the `safe` filter for the notes input; we really want just text in the textarea, no active HTML.
+
+2. add the following function to the end of `presentations-list.py`:
+```python
+def validate_onsubmit():
+    if request.method == 'GET':
+        return False, []
+    
+    f = request.form
+    
+    errors = []
+    
+    if len(f['title']) < 4:
+        errors.append('Title has to be at least 4 characters long')
+    if len(f['presenters']) < 4 or re.search(r'\d', f['presenters']):
+        errors.append('Presenters has to be at least 4 alphabetical characters long')
+    if not re.match(r'\d{4}\-\d{2}\-\d{2}', f['scheduled']):
+        errors.append('Date needs to be YYYY-MM-DD')
+    if not range_regex.match(f['time_range']):
+        errors.append('Time range should be like 9-10am, 9:30-11:40, etc.')
+    
+    is_valid_submission = len(errors) == 0
+    return is_valid_submission, errors
+```
+3. near the top of the file, add the following:
+```python
+import re
+
+range_regex = re.compile(r"^(?P<fromhour>\d{1,2})\s*(:\s*(?P<fromminute>\d{1,2}))?\s*(?P<fromampm>am|pm)?\s*\-\s*(?P<tohour>\d{1,2})\s*(:\s*(?P<tominute>\d{1,2}))?\s*(?P<toampm>am|pm)?$", flags=re.IGNORECASE)
+```
+Let's unpack steps 2 and 3. The `validate_onsubmit` function returns two things: whether a valid form has been submitted, and the list of errors if any. The function uses regular expressions functionality from Python's `re` module. The Regular expressions language is a specialized pattern-matching tool that originated from Perl. Whole books have been written on them and so discussing them is beyond the scope of this course. Just as an example though, `r'\d{4}\-\d{2}\-\d{2}'` matches four digits, followed by a dash, followed by two digits, followed by dash, and followed by two digits. The `r'...'` syntax defines a Python _raw_ string, which interprets the string as-is: backslashes `\` do not need escaping and escape sequences such as newlines `\n` are not replaced. Raw strings are commonly used for regular expressions because regexes make heavy use of backslahes. 
+
+4. Modify the `create` view so it looks like:
+```python
+def create():
+    
+    is_valid_submission, errors = validate_onsubmit()
+    
+    if is_valid_submission:
+        ...
+
+    return render_template('create.html', errors=errors)
+```
+Try to create a form with a presentation title that is too short, or add numbers to the list of presenters. You will see the corresponding error messages and you will notice that the form remembers what the user has entered. Fix the problems and try to resubmit, the presentation will be aded.
+
 
 
 

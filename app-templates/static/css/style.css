@@ -35,3 +35,7 @@ th {
 .centered-text {
     text-align: center;
 }
+
+.form-errors {
+    color: red;
+}
