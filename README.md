@@ -340,7 +340,7 @@ def home():
     
     return render_template('home.html', pres=presentations)
 ```
-* The `render_function` template is imported from the `flask` module. It is used render Jijna templates.
+* The `render_template` function is imported from the `flask` module. It is used render Jijna templates.
 * Remember the `pres` variable in `home.html`? we make it available in the template's context by assigning the `presentations` variable to the keyword argument `pres` of the function `render_template`.
 * `render_template` accepts the template's file name as the first argument. It will look for it in the `templates` folder by default. The function returns the rendered template as a string.
 
@@ -408,6 +408,7 @@ We don't know what the URL of the application will be; during development it is 
 
 Back in the browser, hit `shift+F5` to force a hard refresh which will reload the CSS file. You should see a nicer looking list of presentations.
 
+# Adding a Second Route: Presentation Details
 Presentations may have extra pieces of information, such as notes or short abstracts, and we want to display those when users click on a presentation from the list. So let's add a page which shows presentation details:
 
 1. Add a new template file, `details.html`, with the following content:
@@ -547,3 +548,134 @@ This file will serve as the basic wrapper of other templates. The `{% block name
 Both templates indicate that they inherit from `base.html`. And both of them define the content of the blocks in the parent template that will be overriden. In this case, the two templates override `title` and `content` blocks.
 
 
+# Our First Form: Creating a Presentation
+
+So far, the application is merely transforming a JSON representation to an HTML one. For the app to be useful, users should be able to add, edit, and remove presentations.
+
+1. Create a new template `create.html` with the following content:
+
+```html
+{% extends 'base.html' %}
+
+{% block title %}Add a Presentation{% endblock %}
+
+{% block content %}
+
+<form method="post">
+
+<dl>
+    <dt><label for="title">Title</label></dt>
+    <dd><input id="title" name="title" required type="text" value=""/></dd>
+
+    <dt><label for="presenters">Presenter(s)</label></dt>
+    <dd><input id="presenters" name="presenters" required type="text" value=""/></dd>
+
+    <dt><label for="scheduled">Date</label></dt>
+    <dd><input id="scheduled" required  name="scheduled" type="date" value=""/></dd>
+
+    <dt><label for="time_range">Time</label></dt>
+    <dd><input id="time_range" required  name="time_range" type="text" value=""/></dd>
+</dl>
+
+<p><input type="submit" value="Add"/></p>
+
+</form>
+
+{% endblock %}
+```
+The `form` tag has a `post` method because we intend to change the data on the server. There are two common methods in the HTTP protocol: `GET` and `POST`, information submitted over `GET` is directly encoded into the request URL (as query string parameters, e.g., `search?keywords=hello+world`), while data submitted over `POST` is included in the body of the HTTP request. For this reason, `GET` requests should only be used to retrieve information, while `POST` requests should be used for operations that cause side-effects.
+
+Each form field we want to submit should have a `name` attribute so that the server can access it. Some fields have a `required` attribute which lets the browser do some basic validation checks which otherwise would need to be done in Javascript (yay!).
+
+2. Add a new route for the creation form in `presentations-list.py`:
+```python
+@app.route('/create', methods=('GET', 'POST'))
+def create():
+    return render_template('create.html')
+```
+By default, Flask views only accept `GET` requests. Here, we tell it to allow `POST` requests as well on the `create` view.
+
+3. Navigate to `localhost:5000/create` and you should see the new creation form. Enter some information and hit "Add". Play with the browser validation by leaving out the required fields. When you submit, you will see that you get the same empty form again. This is expected because the `create` view only shows an empty form. Let's change that so that it saves submissions:
+```python
+from flask import Flask, render_template, abort, request, redirect, url_for
+...
+@app.route('/create', methods=('GET','POST'))
+def create():
+    
+    if request.method == 'POST':
+        with open(app.config['presentations_path'], 'r') as f:
+            presentations = json.load(f) 
+            
+        # compute next id to use
+        next_id = 1
+        if len(presentations) > 0:
+            next_id = presentations[-1]["id"] + 1
+        
+        # create new presentation record
+        new_pres = {
+            "id" : next_id,
+            "attachments" : []
+        }
+        for field in ["title", "presenters", "scheduled", "time_range", "notes"]:
+            new_pres[field] = request.form[field]
+        
+        presentations.append(new_pres)
+        
+        # write back to "database"
+        with open(app.config['presentations_path'], 'w') as f:
+            json.dump(presentations, f, indent=4)
+        
+        return redirect(url_for('home'))
+    
+    return render_template('create.html')
+```
+It is common practice to have a form view like `create` handle both `GET` and `POST` requests. If the request method is `POST`, we load our "database" from the JSON file, compute the next record ID to use, create a new record for the submission, and write back to the JSON file (I know, it is pretty dumb to write the whole database back on each submission, but I am putting off the inevitable&mdash;SQL databases&mdash;for instructional purposes). Finally, we issue a redirect response to the browser via the `redirect` function to redirect the user back to the home view. Make no mistake about what is happening here: you are not calling the `home` function directly; rather, Flask is telling the browser to navigate to a new URL, and it is the browser which will then make a new request to the `home` view.
+
+What if the form is missing some fields? for example, if the field `title` does not exist in the form, then `request.form['title']` will raise an exception and Flask will return a 400 Bad Request error, which is good because missing fields may indicate that any attacker is trying to bypass the user interface and send data directly, so we don't need to show them a friendly error page.
+
+Fill out the form and click submit, you should be redirected to the home screen and you should be able to see the new presentation's details, though the lack of confirmation is jarring: the user has no idea if the operation was successful or not and he or she would have to scan the list of presentations to confirm that the presentation has been added. 
+
+A nice UI pattern that solves the lack of feedback is to show a _flash message_ on the home page that only appears after a successful form submission and disappears afterwards. The problem though is how to show the message: remember, Flask is redirecting the browser to the home page; so how would the `home` view know to show a confirmation message or not? the answer is with a cookie 🍪. 
+
+Cookies are small containers (4KB max) of data that are exchanged between the browser and the server. They are sent to the server on every request and can be manipulated both on the server (Flask) and the client sides (i.e., from Javascript on the browser). So how are cookies useful for flashing messages? the idea is to set a cookie before redirecting the browser, and then to have the `home` view read it&mdash;like a boomerang cookie. So let's do it:
+
+1. add `flash` to the list of names important from the `flask` module in `presentations-list.py`
+2. add the following just before the `redirect()` function call in the `create` view:
+```python
+flash('Presentation has been added')
+```
+This statement will append a message to the list of flash messages in the cookie that is sent back to the client.
+
+3. add the following to the base template `base.html`:
+```html
+  {% with messages = get_flashed_messages() %}
+   {% if messages %}
+    <ul class='flashes'>
+    {% for message in messages %}
+      <li>{{ message }}</li>
+    {% endfor %}
+    </ul>
+   {% endif %}
+  {% endwith %}
+```
+The `{% with %}` Jinja statement establishes an _inner scope_. All variables defined within that scope will not be available outside it. In this example, the `messages` variable will not be available after `{% endwidth %}`. The `get_flashed_messages()` function is another function that Flask makes available by default in the template's context. It retrieves the list of flash messages from the cookie. We then display this list with standard Jinja statements.
+
+If you try to create a new presentation and hit submit, you will see a `RuntimeError: The session is unavailable because no secret key was set`. Flask implements `sessions` which persist user information across requests. However, for security purposes, Flask _signs_ the cookies via secret key. Signing refers to computing a hash&mdash;the signature&mdash;of the value of the cookie, using the secret key. When the cookie is sent to the server, Flask hashes the received value and compares it against the signature. If they do not match, Flask discards the request. In short, we need to define a hard secret key for our app to use when signing cookies. Add the following to `presentations-list.py` under `app.config['presentations_path'] = 'presentations.json'`:
+```python
+app.secret_key = b'xYFRlEs3@a'
+```
+Note this is key is weak, but for demo purposes it should be fine. The `b'...'` syntax corresponds to a _byte literal_ in Python which can only contain ASCII characters. In real life, make sure that (a) the secret key is long and hard to guess, and (b) store it somewhere **outside** of source control tree (don't commit it to github).
+
+Now, retry creating a presentation. You should be redirected to `home` view and you will see the "Presentation has been added" message. If you refresh the home page, the flashed messages disappear, which is the intended behavior.
+
+> ## Why the hassle? 
+> You may be wondering, why don't we just call the `home` function directly, rather than issue a redirect. We'd avoid dealing with sessions and cookies but consider what happens if you refresh the home page after submitting the form. The browser will prompt the user to "resend the data" because it thinks he or she are trying to refresh the form. By redirecting the browser, we are telling the client that the form submission is complete.
+
+# Validating Inputs
+
+
+
+TODO:
+* validation and form errors
+* edit/delete
+* refactor db access

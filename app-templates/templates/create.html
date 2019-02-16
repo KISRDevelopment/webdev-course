@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+
+{% block title %}Add a Presentation{% endblock %}
+
+{% block content %}
+
+<form method="post">
+
+<dl>
+    <dt><label for="title">Title</label></dt>
+    <dd><input name="title" required type="text" value=""/></dd>
+
+    <dt><label for="presenters">Presenter(s)</label></dt>
+    <dd><input name="presenters" required type="text" value=""/></dd>
+
+    <dt><label for="scheduled">Date</label></dt>
+    <dd><input name="scheduled" type="date" required value=""/></dd>
+
+    <dt><label for="time_range">Time</label></dt>
+    <dd><input name="time_range" type="text" required value=""/></dd>
+    
+    <dt><label for="notes">Notes</label></dt>
+    <dd><textarea name="notes" cols="40" rows="5"></textarea></dd>
+</dl>
+
+<p><input type="submit" value="Add"/></p>
+
+</form>
+
+{% endblock %}

@@ -1,39 +1,93 @@
 [
     {
-        "id": 1,
-        "notes": "",
-        "presenters": "Mohammad",
-        "scheduled": "2018-05-21",
-        "time_range": "10-11am",
         "title": "Dynamic Key-Value Memory Networks for Knowledge Tracing",
-        "attachments" : [
+        "attachments": [
             {
-                "id" : 1,
-                "title" : "Presentation"
+                "title": "Presentation",
+                "id": 1
             }
-        ]
-    },
-    {
-        "id": 2,
+        ],
+        "scheduled": "2018-05-21",
+        "id": 1,
+        "presenters": "Mohammad",
         "notes": "",
-        "presenters": "Dr. Ali Al-Hemoud",
-        "scheduled": "2018-05-30",
-        "time_range": "9:30-10am",
-        "title": "Comparison of Indoor Air Quality in Schools: Urban vs. Industrial 'Oil & Gas' Zones in Kuwait",
-        "attachments" : []
+        "time_range": "10-11am"
     },
     {
-        "id": 3,
-        "notes": "<a href=\"https://gist.github.com/mmkhajah/ae2b3421ec4bcb2bd3ecb9a2bf928cdb\">The problem with Figure 1</a>",
-        "presenters": "Muneera & Megha",
+        "title": "Comparison of Indoor Air Quality in Schools: Urban vs. Industrial 'Oil & Gas' Zones in Kuwait",
+        "attachments": [],
         "scheduled": "2018-05-30",
-        "time_range": "10-11am",
+        "id": 2,
+        "presenters": "Dr. Ali Al-Hemoud",
+        "notes": "",
+        "time_range": "9:30-10am"
+    },
+    {
         "title": "Long-Term Spatiotemporal Analysis of Social Media for Device-to-Device Networks",
-        "attachments" : [
+        "attachments": [
             {
-                "id" : 1,
-                "title" : "Presentation"
+                "title": "Presentation",
+                "id": 1
             }
-        ]
+        ],
+        "scheduled": "2018-05-30",
+        "id": 3,
+        "presenters": "Muneera & Megha",
+        "notes": "<a href=\"https://gist.github.com/mmkhajah/ae2b3421ec4bcb2bd3ecb9a2bf928cdb\">The problem with Figure 1</a>",
+        "time_range": "10-11am"
+    },
+    {
+        "title": "PResentation 1",
+        "attachments": [],
+        "scheduled": "2019-02-07",
+        "id": 4,
+        "presenters": "Mohamamd",
+        "notes": "",
+        "time_range": "8-10am"
+    },
+    {
+        "title": "Extending IRT with Online Inference and Problem Representations",
+        "attachments": [],
+        "scheduled": "2019-02-22",
+        "id": 5,
+        "presenters": "tset",
+        "notes": "",
+        "time_range": "8-10am"
+    },
+    {
+        "title": "test2",
+        "attachments": [],
+        "scheduled": "2019-01-31",
+        "id": 6,
+        "presenters": "test3",
+        "notes": "",
+        "time_range": "8-10am"
+    },
+    {
+        "title": "test24",
+        "attachments": [],
+        "scheduled": "2019-01-31",
+        "id": 7,
+        "presenters": "test3",
+        "notes": "",
+        "time_range": "8-10am"
+    },
+    {
+        "title": "test24",
+        "attachments": [],
+        "scheduled": "2019-01-31",
+        "id": 8,
+        "presenters": "test3",
+        "notes": "",
+        "time_range": "8-10am"
+    },
+    {
+        "title": "test24",
+        "attachments": [],
+        "scheduled": "2019-01-31",
+        "id": 9,
+        "presenters": "test3",
+        "notes": "",
+        "time_range": "8-10am"
     }
 ]
