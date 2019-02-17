@@ -1026,7 +1026,7 @@ def delete(pid):
 * the `delete` function simply filters the list of presentation by excluding the requested presentation id. It then redirects back to home page.
 5. Navigate to `localhost:5000/edit/1` and try editing or deleting the presentation. Try it for other presentations as well.
 
-As you may have noticed, having to manual enter `create` and `edit` urls is tiresome. Let's add some friendly links:
+As you may have noticed, having to manually enter `create` and `edit` urls is tiresome. Let's add some friendly links:
 
 1. modify `home.html`:
 ```html
@@ -1041,6 +1041,76 @@ As you may have noticed, having to manual enter `create` and `edit` urls is tire
 ...
 ```
 
+# File Uploads
+
+Users should be able to upload useful attachments to go with presentations: the powerpoint itself, extra notes, media, etc. It is time to add this functionality to our app. The basic file upload process over HTTP is:
+1. When the user issues a `POST` request, get the list of files they want to upload.
+2. For each file, generate a secure file name, so that the user cannot use malicious file names to compromise the server (e.g., `../../../file`).
+3. Store the file in a designated `upload` folder on the file system.
+4. Make a record in the database of the attachment
+
+In the edit form, we'll also need to allow users to remove attachment so things become a bit more complicated there. That's why we start by adding upload function to the create presentation form.
+
+1. create a folder `uploads` under the `app-templates` folder.
+2. in `presentations-list.py`, add the following imports and config:
+```python
+import random
+import os
+from werkzeug.utils import secure_filename
+import string
+...
+app.config['upload_path'] = './uploads/'
+```
+3. at the bottom of the same file, add this function:
+```python
+def generate_file_name(filename):
+    prefix = randstr(8)
+    filename = '%s-%s' % (prefix, secure_filename(filename))
+    return filename
+
+# from stackoverflow ...
+def randstr(N):
+    return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(N))
+```
+`generate_file_name` secures the given name and attaches a random prefix to it so that files with identical names don't overwrite each other. 
+
+4. modify the `create` view to include the attachment handling logic:
+```python
+if form.validate_on_submit():
+        
+        # upload attachments
+        attachments = []
+        if 'attachments' in request.files:
+           
+           for f in request.files.getlist('attachments'):
+               filename = generate_file_name(f.filename)
+               f.save(os.path.join(app.config['uploads_path'], filename))
+               attachments.append(filename)
+
+         ...
+        # create new presentation record
+        new_pres = {
+            "id" : next_id,
+            "attachments" : attachments
+        }
+```
+5. add an attachments field to `PresentationForm`:
+```python
+attachments = FileField('Attachments')
+```
+6. Update the form template in `_presentation_form.html`:
+```html
+{{ render_field(form.attachments) }}
+```
+7. Change the `form` tag so that it supports file uploads in `create.html`:
+```html
+<form method="post" enctype="multipart/form-data">
+```
+8. Try creating a presentation while uploading some files!
+
+
 TODO:
 * uploads
+* SQL
+* authentication and authorization
 

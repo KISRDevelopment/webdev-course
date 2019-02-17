@@ -18,5 +18,5 @@ class PresentationForm(FlaskForm):
     scheduled = DateField('Date', validators=[vals.DataRequired(message="You need to specify a date")])
     time_range = StringField('Time', validators=[vals.DataRequired(message="You need to specify a time"), range_validator])
     notes = StringField('Notes', widget=widgets.TextArea())
-    
+    attachments = FileField('Attachments')
 

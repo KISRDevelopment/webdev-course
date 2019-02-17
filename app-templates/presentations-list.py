@@ -3,9 +3,13 @@ from flask import Flask, render_template, abort, request, redirect, url_for, \
 import json
 from forms import PresentationForm
 import datetime
-
+import random
+import os
+from werkzeug.utils import secure_filename
+import string
 app = Flask(__name__)
 app.config['presentations_path'] = 'presentations.json'
+app.config['uploads_path'] = './uploads/'
 app.secret_key = b'xYFRlEs3@a'
 
 @app.route('/')
@@ -38,6 +42,16 @@ def create():
     
     if form.validate_on_submit():
         
+        # upload attachments
+        attachments = []
+        if 'attachments' in request.files:
+           
+           for f in request.files.getlist('attachments'):
+               filename = generate_file_name(f.filename)
+               f.save(os.path.join(app.config['uploads_path'], filename))
+               attachments.append(filename)
+
+               
         with open(app.config['presentations_path'], 'r') as f:
             presentations = json.load(f) 
             
@@ -49,7 +63,7 @@ def create():
         # create new presentation record
         new_pres = {
             "id" : next_id,
-            "attachments" : []
+            "attachments" : attachments
         }
         for fname in ["title", "presenters", "scheduled", "time_range", "notes"]:
             new_pres[fname] = getattr(form, fname).data
@@ -108,4 +122,12 @@ def delete(pid):
        
     flash('Presentation deleted.')
     return redirect(url_for('home'))
+    
+def generate_file_name(filename):
+    prefix = randstr(8)
+    filename = '%s-%s' % (prefix, secure_filename(filename))
+    return filename
+
+def randstr(N):
+    return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(N))
     
