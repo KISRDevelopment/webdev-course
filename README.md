@@ -895,11 +895,19 @@ hello
 
 5. Phew! that was quite a few digressions, but it is important to understand what the code does. Try to create a new presentation and make sure the validation still works.
 
+# Edit and Delete Operations
 
+Users many need to edit a presentation's details after it's been added due to rescheduling, incorrect details, etc. The edit view will be very similar to the add view, except that it uses prepopulated fields from the database. So let's first refactor the templates so we don't have to repeat ourselves.
+
+> **Refactoring** refers to improving code structure without changing function.
+
+1. Create a template `_presentation_form.html` with the following content:
+```html
+
+```
 
 
 TODO:
-* validation and form errors
 * edit/delete
 * uploads
 
