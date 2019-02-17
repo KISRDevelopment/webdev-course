@@ -3,6 +3,9 @@
 {% block title %}Presentation: {{ p['title'] }}{% endblock %}
 
 {% block content %}
+
+<a href='{{ url_for("edit", pid=p["id"]) }}' class='btn-txt'>Edit</a>
+
 <ul>
    <li><strong>Title:</strong> {{ p['title'] }}</li>
    <li><strong>Presenter(s):</strong> {{ p['presenters'] }}</li>

@@ -2,6 +2,7 @@ from flask import Flask, render_template, abort, request, redirect, url_for, \
     flash
 import json
 from forms import PresentationForm
+import datetime
 
 app = Flask(__name__)
 app.config['presentations_path'] = 'presentations.json'
@@ -65,4 +66,46 @@ def create():
     
     return render_template('create.html', form=form)
 
+@app.route('/edit/<int:pid>', methods=('GET', 'POST'))
+def edit(pid):
+    with open(app.config['presentations_path'], 'r') as f:
+        presentations = json.load(f) 
+    
+    presentation = next((p for p in presentations if p['id'] == pid), None)
+    presentation['scheduled'] = datetime.datetime.strptime(presentation['scheduled'], '%Y-%m-%d').date()
+    
+    if presentation is None:
+        abort(404)
+    
+    form = PresentationForm(data=presentation)
+    
+    if form.validate_on_submit():
+    
+        for fname in ["title", "presenters", "scheduled", "time_range", "notes"]:
+            presentation[fname] = getattr(form, fname).data
+        presentation['scheduled'] = presentation['scheduled'].strftime('%Y-%m-%d')
+        
+        # write back to "database"
+        with open(app.config['presentations_path'], 'w') as f:
+            json.dump(presentations, f, indent=4)
+        
+        flash('Presentation has been edited')
+        return redirect(url_for('home'))
+        
+    return render_template('edit.html', form=form, pid=pid)
+    
+@app.route('/delete/<int:pid>', methods=('POST',))
+def delete(pid):
+    
+    with open(app.config['presentations_path'], 'r') as f:
+        presentations = json.load(f) 
+    
+    presentations = [p for p in presentations if p['id'] != pid]
+    
+    # write back to "database"
+    with open(app.config['presentations_path'], 'w') as f:
+        json.dump(presentations, f, indent=4)
+       
+    flash('Presentation deleted.')
+    return redirect(url_for('home'))
     

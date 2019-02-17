@@ -390,6 +390,17 @@ th {
 .centered-text {
     text-align: center;
 }
+
+.form-errors {
+    color: red;
+}
+
+.btn-txt {
+    font-size: 1.25rem;
+    text-decoration: none;
+    color: #333366;
+    font-weight: bold;
+}
 ```
 3. Go back to the template `home.html` and add the following line to the `<head>` section:
 
@@ -901,13 +912,135 @@ Users many need to edit a presentation's details after it's been added due to re
 
 > **Refactoring** refers to improving code structure without changing function.
 
-1. Create a template `_presentation_form.html` with the following content:
+1. create a template `_presentation_form.html` with the following content:
 ```html
+{% macro render_field(field) %}
+  <dt>{{ field.label }}</dt>
+  <dd>{{ field(**kwargs)|safe }}
+  {% if field.errors %}
+    <ul class="form-errors">
+    {% for error in field.errors %}
+      <li>{{ error }}</li>
+    {% endfor %}
+    </ul>
+  {% endif %}
+  </dd>
+{% endmacro %}
 
+<dl>
+    {{ render_field(form.title) }}
+    {{ render_field(form.presenters) }}
+    {{ render_field(form.scheduled) }}
+    {{ render_field(form.time_range) }}
+    {{ render_field(form.notes) }}
+</dl>
+```
+2. change `create.html` to:
+```html
+{% extends 'base.html' %}
+
+{% block title %}Add a Presentation{% endblock %}
+
+{% block content %}
+
+<form method="post">
+{{ form.csrf_token }}
+
+{% include "_presentation_form.html" %}
+
+<p><input type="submit" value="Add"/></p>
+
+</form>
+
+{% endblock %}
+```
+* The `{% include %}` statement renders the target template within the _current_ active context and puts the result where the statement is. Since `form`  can be accessed from the current context, so can it in `_presentation_form.html`.
+3. create `edit.html` with the following content:
+```html
+{% extends 'base.html' %}
+
+{% block title %}Edit Presentation{% endblock %}
+
+{% block content %}
+
+  <form method="post">
+   {{ form.csrf_token }}
+   
+   {% include "_presentation_form.html" %}
+   
+   <p><input type="submit" value="Done">
+  </form>
+  
+  <form action="{{ url_for('delete', pid=pid) }}" method="post">
+    <input class="danger" type="submit" value="Delete" onclick="return confirm('Are you sure?');">
+  </form>
+{% endblock %}
+```
+* Not much is going here. The edit form is similar to the create form. We add another form who's target is the delete action. There is a bit of inline Javascript that confirms that the user really wants to delete the presentation when he or she clicks the delete button. 
+4. add the `edit` and `delete` view functions:
+```python
+@app.route('/edit/<int:pid>', methods=('GET', 'POST'))
+def edit(pid):
+    with open(app.config['presentations_path'], 'r') as f:
+        presentations = json.load(f) 
+    
+    presentation = next((p for p in presentations if p['id'] == pid), None)
+    presentation['scheduled'] = datetime.datetime.strptime(presentation['scheduled'], '%Y-%m-%d').date()
+    
+    if presentation is None:
+        abort(404)
+    
+    form = PresentationForm(data=presentation)
+    
+    if form.validate_on_submit():
+    
+        for fname in ["title", "presenters", "scheduled", "time_range", "notes"]:
+            presentation[fname] = getattr(form, fname).data
+        presentation['scheduled'] = presentation['scheduled'].strftime('%Y-%m-%d')
+        
+        # write back to "database"
+        with open(app.config['presentations_path'], 'w') as f:
+            json.dump(presentations, f, indent=4)
+        
+        flash('Presentation has been edited')
+        return redirect(url_for('home'))
+        
+    return render_template('edit.html', form=form, pid=pid)
+    
+@app.route('/delete/<int:pid>', methods=('POST',))
+def delete(pid):
+    
+    with open(app.config['presentations_path'], 'r') as f:
+        presentations = json.load(f) 
+    
+    presentations = [p for p in presentations if p['id'] != pid]
+    
+    # write back to "database"
+    with open(app.config['presentations_path'], 'w') as f:
+        json.dump(presentations, f, indent=4)
+       
+    flash('Presentation deleted.')
+    return redirect(url_for('home'))
+```
+* the `edit` function finds the requested presentation, prepopulates the form with its data, validates the `POST` request&mdash;if applicable&mdash;and either makes the edit or displays the form. Some annoying `date` conversions occur because the `PresentationForm` class expects a `DateField` which requires the data coming from the database to have type `date`. So some type gymnastics are necessary to make the class happy with the date type.
+* the `delete` function simply filters the list of presentation by excluding the requested presentation id. It then redirects back to home page.
+5. Navigate to `localhost:5000/edit/1` and try editing or deleting the presentation. Try it for other presentations as well.
+
+As you may have noticed, having to manual enter `create` and `edit` urls is tiresome. Let's add some friendly links:
+
+1. modify `home.html`:
+```html
+{% block content %}
+<a href='{{ url_for("create") }}' class='btn-txt'>Add a Presentation</a>
+...
+```
+2. modify `details.html`:
+```html
+{% block content %}
+<a href='{{ url_for("edit", pid=p["id"]) }}' class='btn-txt'>Edit</a>
+...
 ```
 
-
 TODO:
-* edit/delete
 * uploads
 

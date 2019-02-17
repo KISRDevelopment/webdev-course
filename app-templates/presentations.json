@@ -1,138 +1,92 @@
 [
     {
-        "id": 1,
-        "time_range": "10-11am",
-        "title": "Dynamic Key-Value Memory Networks for Knowledge Tracing",
-        "scheduled": "2018-05-21",
-        "attachments": [
-            {
-                "title": "Presentation",
-                "id": 1
-            }
-        ],
-        "notes": "",
-        "presenters": "Mohammad"
-    },
-    {
-        "id": 2,
-        "time_range": "9:30-10am",
-        "title": "Comparison of Indoor Air Quality in Schools: Urban vs. Industrial 'Oil & Gas' Zones in Kuwait",
-        "scheduled": "2018-05-30",
-        "attachments": [],
-        "notes": "",
-        "presenters": "Dr. Ali Al-Hemoud"
-    },
-    {
-        "id": 3,
-        "time_range": "10-11am",
-        "title": "Long-Term Spatiotemporal Analysis of Social Media for Device-to-Device Networks",
-        "scheduled": "2018-05-30",
-        "attachments": [
-            {
-                "title": "Presentation",
-                "id": 1
-            }
-        ],
-        "notes": "<a href=\"https://gist.github.com/mmkhajah/ae2b3421ec4bcb2bd3ecb9a2bf928cdb\">The problem with Figure 1</a>",
-        "presenters": "Muneera & Megha"
-    },
-    {
         "id": 4,
         "time_range": "8-10am",
-        "title": "PResentation 1",
-        "scheduled": "2019-02-07",
+        "presenters": "Mohamamd",
         "attachments": [],
         "notes": "",
-        "presenters": "Mohamamd"
+        "scheduled": "2019-02-07",
+        "title": "PResentation 1"
     },
     {
         "id": 5,
         "time_range": "8-10am",
-        "title": "Extending IRT with Online Inference and Problem Representations",
+        "presenters": "tset",
+        "attachments": [],
+        "notes": "",
         "scheduled": "2019-02-22",
-        "attachments": [],
-        "notes": "",
-        "presenters": "tset"
-    },
-    {
-        "id": 6,
-        "time_range": "8-10am",
-        "title": "test2",
-        "scheduled": "2019-01-31",
-        "attachments": [],
-        "notes": "",
-        "presenters": "test3"
-    },
-    {
-        "id": 7,
-        "time_range": "8-10am",
-        "title": "test24",
-        "scheduled": "2019-01-31",
-        "attachments": [],
-        "notes": "",
-        "presenters": "test3"
+        "title": "Extending IRT with Online Inference and Problem Representations"
     },
     {
         "id": 8,
         "time_range": "8-10am",
-        "title": "test24",
-        "scheduled": "2019-01-31",
+        "presenters": "test3",
         "attachments": [],
         "notes": "",
-        "presenters": "test3"
+        "scheduled": "2019-01-31",
+        "title": "test24"
     },
     {
         "id": 9,
         "time_range": "8-10am",
-        "title": "test24",
-        "scheduled": "2019-01-31",
+        "presenters": "test3",
         "attachments": [],
         "notes": "",
-        "presenters": "test3"
+        "scheduled": "2019-01-31",
+        "title": "test24"
     },
     {
         "id": 10,
         "time_range": "5-3",
-        "title": "test",
-        "scheduled": "2019-02-13",
+        "presenters": "test ",
         "attachments": [],
         "notes": "tadf",
-        "presenters": "test "
+        "scheduled": "2019-02-13",
+        "title": "test"
     },
     {
         "id": 11,
         "time_range": "8-10",
-        "title": "test",
-        "scheduled": "2019-02-20",
+        "presenters": "mohammad",
         "attachments": [],
         "notes": "",
-        "presenters": "mohammad"
+        "scheduled": "2019-02-20",
+        "title": "test"
     },
     {
         "id": 12,
-        "attachments": [],
-        "title": "34453453",
-        "presenters": "hello",
-        "scheduled": "2019-02-08",
         "time_range": "3-4",
-        "notes": ""
+        "presenters": "hello",
+        "attachments": [],
+        "notes": "",
+        "scheduled": "2019-02-08",
+        "title": "34453453"
     },
     {
         "id": 13,
-        "attachments": [],
-        "title": "test",
-        "presenters": "tes asdf",
-        "scheduled": "2019-02-15",
         "time_range": "8-11",
-        "notes": ""
+        "presenters": "tes asdf",
+        "attachments": [],
+        "notes": "",
+        "scheduled": "2019-02-15",
+        "title": "test"
     },
     {
         "id": 14,
-        "attachments": [],
-        "title": "test",
-        "presenters": "hello",
-        "scheduled": "2019-02-06",
         "time_range": "33-40",
-        "notes": ""
+        "presenters": "hello",
+        "attachments": [],
+        "notes": "",
+        "scheduled": "2019-02-06",
+        "title": "test"
+    },
+    {
+        "id": 15,
+        "time_range": "3-4",
+        "presenters": "test hhah",
+        "attachments": [],
+        "notes": "",
+        "scheduled": "2019-02-13",
+        "title": "test"
     }
 ]

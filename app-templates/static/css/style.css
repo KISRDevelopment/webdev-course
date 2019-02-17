@@ -39,3 +39,10 @@ th {
 .form-errors {
     color: red;
 }
+
+.btn-txt {
+    font-size: 1.25rem;
+    text-decoration: none;
+    color: #333366;
+    font-weight: bold;
+}
