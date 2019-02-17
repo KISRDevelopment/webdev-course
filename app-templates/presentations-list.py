@@ -1,9 +1,7 @@
 from flask import Flask, render_template, abort, request, redirect, url_for, \
     flash
 import json
-import re
-
-range_regex = re.compile(r"^(?P<fromhour>\d{1,2})\s*(:\s*(?P<fromminute>\d{1,2}))?\s*(?P<fromampm>am|pm)?\s*\-\s*(?P<tohour>\d{1,2})\s*(:\s*(?P<tominute>\d{1,2}))?\s*(?P<toampm>am|pm)?$", flags=re.IGNORECASE)
+from forms import PresentationForm
 
 app = Flask(__name__)
 app.config['presentations_path'] = 'presentations.json'
@@ -35,9 +33,9 @@ def details(pid):
 @app.route('/create', methods=('GET','POST'))
 def create():
     
-    is_valid_submission, errors = validate_onsubmit()
+    form = PresentationForm()
     
-    if is_valid_submission:
+    if form.validate_on_submit():
         
         with open(app.config['presentations_path'], 'r') as f:
             presentations = json.load(f) 
@@ -52,9 +50,10 @@ def create():
             "id" : next_id,
             "attachments" : []
         }
-        for field in ["title", "presenters", "scheduled", "time_range", "notes"]:
-            new_pres[field] = request.form[field]
-        
+        for fname in ["title", "presenters", "scheduled", "time_range", "notes"]:
+            new_pres[fname] = getattr(form, fname).data
+        new_pres['scheduled'] = new_pres['scheduled'].strftime('%Y-%m-%d')
+
         presentations.append(new_pres)
         
         # write back to "database"
@@ -64,25 +63,6 @@ def create():
         flash('Presentation has been added')
         return redirect(url_for('home'))
     
-    return render_template('create.html', errors=errors)
+    return render_template('create.html', form=form)
 
-def validate_onsubmit():
-    if request.method == 'GET':
-        return False, []
-    
-    f = request.form
-    
-    errors = []
-    
-    if len(f['title']) < 4:
-        errors.append('Title has to be at least 4 characters long')
-    if len(f['presenters']) < 4 or re.search(r'\d', f['presenters']):
-        errors.append('Presenters has to be at least 4 alphabetical characters long')
-    if not re.match(r'\d{4}\-\d{2}\-\d{2}', f['scheduled']):
-        errors.append('Date needs to be YYYY-MM-DD')
-    if not range_regex.match(f['time_range']):
-        errors.append('Time range should be like 9-10am, 9:30-11:40, etc.')
-    
-    is_valid_submission = len(errors) == 0
-    return is_valid_submission, errors
     

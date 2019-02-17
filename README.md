@@ -765,10 +765,141 @@ def create():
 ```
 Try to create a form with a presentation title that is too short, or add numbers to the list of presenters. You will see the corresponding error messages and you will notice that the form remembers what the user has entered. Fix the problems and try to resubmit, the presentation will be aded.
 
+Input validation is such a common task in web development that many libraries have been developed to streamline it. Python's `WTForms` is the default choice for many Flask users, so Flask developers have created an even easier-to-use form validation library based on `WTForms` called `Flask-WTF`.
+
+1. Install `Flask-WTF` with `pip install Flask-WTF`
+
+2. Create a file called `forms.py` in the `app-tempaltes` directory with the following content:
+```python
+from flask_wtf import FlaskForm
+from wtforms import StringField, FileField, validators, widgets, Field, HiddenField
+from wtforms.fields.html5 import DateField
+import re
+
+vals = validators
+range_regex = re.compile(r"^(?P<fromhour>\d{1,2})\s*(:\s*(?P<fromminute>\d{1,2}))?\s*(?P<fromampm>am|pm)?\s*\-\s*(?P<tohour>\d{1,2})\s*(:\s*(?P<tominute>\d{1,2}))?\s*(?P<toampm>am|pm)?$", flags=re.IGNORECASE)
+
+range_validator = vals.Regexp(range_regex,
+                                    message='Time range format is invalid. Examples of valid inputs are 11-1pm, 10:30am-11:00am, etc.')
+class PresentationForm(FlaskForm):
+    
+    title = StringField('Title', validators=[vals.Length(min=4, message="Title has to be at least 4 characters long")])
+    presenters = StringField('Presenter(s)', validators=[
+        vals.Length(min=4, message="List of presenters has to be at least 4 alphabetical characters long"), 
+        vals.Regexp(r'^[a-zA-Z\s&]+$', message="Only alphabetical characters are allowed in the presenters list")
+    ])
+    scheduled = DateField('Date', validators=[vals.DataRequired()])
+    time_range = StringField('Time', validators=[vals.DataRequired(), range_validator])
+    notes = StringField('Notes', widget=widgets.TextArea())
+```
+* We define a class that inherits from the `FlaskForm` class, which provides useful functions for form validation.
+* We define the fields in our form as _class_ attributes. Unlike _instance_ attributes (e.g., `player.x = 45`) which are defined on a per-instance basis, class attributes are *shared* across all instances of a class. For example,
+```python
+>>> class foo:
+>>>    x = 3
+>>> a = foo()
+>>> b = foo()
+>>> a.x
+3
+>>> b.x
+3
+>>> foo.x = 54 # to set a class attribute, you have to refer to the class by name
+>>> a.x
+54
+>>> b.x
+54
+>>> a.x = 98 # this creates an _instance_ attribute, masking the class one
+>>> b.x
+54
+```
+* `WTForms` provides several classes that correspond roughly to HTML form fields. The `StringField` for example, corresponds to an `<input type="text">` field by default. Each field class takes a title field which will get dispalyed on the form, and a list of validator objects to run against the field's value. `WTForms` provides common useful validator classes: `Length` ensures that the length of the input is within a minimum and/or maximum, `DataRequired` ensures that the user has entered a value, and `Regexp` verifies that the input matches a regular expression pattern. In this code, we are calling the constructors of these validators to create validator objects. Each constructor takes a `message` argument which gets displayed when there is an error in the validation. Notice how we supply a `TextArea` widget to the `notes` field because we want to show that field as a `<textarea>`.
+3. Change `presentations-list.py` as follows:
+```python
+import json
+from forms import PresentationForm
+...
+@app.route('/create', methods=('GET','POST'))
+def create():
+    
+    form = PresentationForm()
+    
+    if form.validate_on_submit():
+        ...
+        for fname in ["title", "presenters", "scheduled", "time_range", "notes"]:
+            new_pres[fname] = getattr(form, fname).data
+        new_pres['scheduled'] = new_pres['scheduled'].strftime('%Y-%m-%d')
+        ...
+    return render_template('create.html', form=form)
+```
+* We import and instantiate the `PresentationForm`. The form class knows to automatically use the `request` object that Flask provides to get form data.
+* `validate_on_submit()` returns `True` if the request is `POST` and all fields are valid, and `False` otherwise.
+* The class attributes we defiend in `PresentationForm` contain submission data, but we access them dynamically with `form[fname]`. To access object attributes in Python dynamically, use the `getattr(obj, attrname)` function.
+* Each class attribute in `PresentationForm` has a `data` attribute which contains the submitted value. We can use the `request.form[fname]` as before but sometimes, the form class will do extra _sanitization_ on the submitted values so it is a good idea to use the value in the form, not the request.
+* The `Date` field helpfully converts the scheduled filed into a Python `date` object. But the `json` module cannot serialize `date` objects so for now, we manually coerce the scheduled field into a string with `strftime()`. 
+* We deliver the `form` itself to the template context.
+
+4. Change the `create.html` template:
+```html
+{% macro render_field(field) %}
+  <dt>{{ field.label }}</dt>
+  <dd>{{ field(**kwargs)|safe }}
+  {% if field.errors %}
+    <ul class="form-errors">
+    {% for error in field.errors %}
+      <li>{{ error }}</li>
+    {% endfor %}
+    </ul>
+  {% endif %}
+  </dd>
+{% endmacro %}
+
+{% extends 'base.html' %}
+
+{% block title %}Add a Presentation{% endblock %}
+
+{% block content %}
+
+<form method="post">
+{{ form.csrf_token }}
+<dl>
+    {{ render_field(form.title) }}
+    {{ render_field(form.presenters) }}
+    {{ render_field(form.scheduled) }}
+    {{ render_field(form.time_range) }}
+    {{ render_field(form.notes) }}
+</dl>
+
+<p><input type="submit" value="Add"/></p>
+
+</form>
+
+{% endblock %}
+```
+* We define a Jinja _macro_ which is similar to a function in a programming language. `render_field` takes a form field, which is one of the class attributes we defined in `PresentationForm`, and generates appropriate HTML. The expression `field(**kwargs)|safe` generates the HTML of the input field (e.g., `<input>`,etc.), which is why we marked it `safe`. `**kwargs` means to pass any keyword arguments that were passed to `render_field` directly to the `field` object. Finally, calling the `field` object generates the appropriate HTML. Now you may be wondering, how can you call an object? Python supports the notion of _functors_: objects that can be called directly. Here's one example:
+```python
+>>> class foo:
+>>>    def __call__(self):
+>>>        print("hello")
+>>> a = foo()
+>>> a()
+hello
+```
+* We've replaced the hard-coded fields HTML in the `content` block with calls to the `render_field` macro for each field in our form.
+* The expression `{{ form.cssrf_token }}` generates a hidden input field which contains a token generated by the server. Here's what it generated when I visited the page:
+```html
+<input id="csrf_token" name="csrf_token" type="hidden" value="ImU1NTUwMTM4MzU0ZWNiYTgwNzY3NTBlNDAyOTY5N2YwYjZiYzQ2OGYi.XGkt8A.rrEhNqS7f_asvsBzNADLJQaulZU">
+```
+* CSRF stands for Cross-Site-Request-Forgery and it is a security vulnerability that allows a malicious attacker to masquerade as a legitimate user. Briefly, a user logins into your site and recieves an encrypted cookie with a session ID. The user is then lured into the attacker's site, where it contains Javascript that executes an AJAX request to your website. Unfortunatly, the user's browser will send the cookie along with the AJAX request so your website has no idea that the AJAX request was not made on behalf of the user. 
+* The CSRF token is one mitigation strategy: the server generates a random token, hashes it, and stores it in the user's session (cookie). When recieving a request, the server hashes the token in the request and compares the hash with the value stored in the session. If the two values don't match, the request is rejected. This is why we need to generate a CSRF hidden field: so that the server can be sure that the request is valid. Note that this whole scheme depends on good encryption and on the browser not having access to the cookie.
+* By default `Flask-WTF` demands that a CSRF token is included with any form.
+
+5. Phew! that was quite a few digressions, but it is important to understand what the code does. Try to create a new presentation and make sure the validation still works.
+
 
 
 
 TODO:
 * validation and form errors
 * edit/delete
-* refactor db access
+* uploads
+
