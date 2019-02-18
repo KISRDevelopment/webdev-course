@@ -89,13 +89,28 @@ def edit(pid):
     if presentation is None:
         abort(404)
     
+    attachments = list(db.execute("""select * from attachment a where a.presentation_id = ?""", (pid,)))
+    
     form = PresentationForm(data=presentation)
     
     if form.validate_on_submit():
+        # upload attachments
+        attachments = []
+        if 'attachments' in request.files:
+           for f in request.files.getlist('attachments'):
+               filename = generate_file_name(f.filename)
+               f.save(os.path.join(app.config['uploads_path'], filename))
+               attachments.append(filename)
+        
         db.execute("""update presentation set title = ?, presenters = ?,
             scheduled = ?, time_range = ?, notes = ? where id=?""", 
             [getattr(form, f).data for f in 
             ('title', 'presenters', 'scheduled', 'time_range', 'notes')] + [pid])
+            
+        for a in attachments:
+            db.execute("""insert into attachment(presentation_id, filename)
+             values(?, ?)""", (pid, a))
+        
         db.commit()
         db.close()
         
@@ -103,12 +118,23 @@ def edit(pid):
         return redirect(url_for('home'))
     
     db.close()
-    return render_template('edit.html', form=form, pid=pid)
+    return render_template('edit.html', form=form, pid=pid, attachments=attachments)
     
 @app.route('/delete/<int:pid>', methods=('POST',))
 def delete(pid):
     db = connect_db()
+
+    # remove attachments
+    attachments = db.execute("""select * from attachment a where a.presentation_id = ?""", (pid,))
+    for a in attachments:
+        path = os.path.join(app.config['uploads_path'], a['filename'])
+        if os.path.isfile(path):
+            os.remove(path)
+    db.execute("delete from attachment where presentation_id=?", (pid,))
+    
     db.execute("""delete from presentation where id=?""", (pid,))
+    
+    
     db.commit()
     db.close()
     flash('Presentation deleted.')
@@ -120,9 +146,30 @@ def getfile(aid):
     attachment = db.execute("""select * from attachment a where a.id = ?""", (aid,)).fetchone()
 
     if attachment is None:
+        db.close()
         abort(404)
         
     return send_from_directory(app.config['uploads_path'], attachment['filename'], as_attachment=True)
+    
+@app.route('/delete_attachment/<int:aid>', methods=('POST',))
+def delete_attachment(aid):
+    db = connect_db()
+    attachment = db.execute("""select * from attachment a where a.id = ?""", (aid,)).fetchone()
+
+    if attachment is None:
+        db.close()
+        abort(404)
+    
+    path = os.path.join(app.config['uploads_path'], attachment['filename'])
+    if os.path.isfile(path):
+        os.remove(path)
+    
+    db.execute("""delete from attachment where id=?""", (aid,))
+    db.commit()
+    db.close()
+    
+    flash('Attachment %s has been removed' % attachment['filename'])    
+    return redirect(url_for('edit', pid=attachment['presentation_id']))
     
 def connect_db():
     

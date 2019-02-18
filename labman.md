@@ -1184,6 +1184,7 @@ def getfile(aid):
     attachment = db.execute("""select * from attachment a where a.id = ?""", (aid,)).fetchone()
 
     if attachment is None:
+        db.close()
         abort(404)
         
     return send_from_directory(app.config['uploads_path'], attachment['filename'], as_attachment=True)
@@ -1220,73 +1221,122 @@ attachments = FileField('Attachments')
 
 10. You can now try uploading files with a new presentation and they will show up when you view the details page. 
 
-We now need to update the edit view so that it allows uploading new files and removing existing ones. There are no new concepts here, so let's quickly zip through it:
+We need to update the edit view so that it allows uploading new files and removing existing ones. There are no new concepts here, so let's quickly zip through it:
 
 1. Add a route to delete attachments:
 ```python
-@app.route('/delete_attachment/<int:pid>/<int:aid>', methods=('POST',))
-def delete_attachment(pid, aid):
-    
-    with open(app.config['presentations_path'], 'r') as f:
-        presentations = json.load(f) 
+@app.route('/delete_attachment/<int:aid>', methods=('POST',))
+def delete_attachment(aid):
+    db = connect_db()
+    attachment = db.execute("""select * from attachment a where a.id = ?""", (aid,)).fetchone()
 
-    presentation = next((p for p in presentations if p['id'] == pid), None)
+    if attachment is None:
+        db.close()
+        abort(404)
+    
+    path = os.path.join(app.config['uploads_path'], attachment['filename'])
+    if os.path.isfile(path):
+        os.remove(path)
+    
+    db.execute("""delete from attachment where id=?""", (aid,))
+    db.commit()
+    db.close()
+    
+    flash('Attachment %s has been removed' % attachment['filename'])    
+    return redirect(url_for('edit', pid=attachment['presentation_id']))
+```
+2. Update the `edit` view to support uploading attachments:
+```python
+@app.route('/edit/<int:pid>', methods=('GET', 'POST'))
+def edit(pid):
+    db = connect_db()
+    presentation = db.execute("""select * from presentation p where p.id = ?""", (pid,)).fetchone()
 
     if presentation is None:
         abort(404)
     
-    if aid < 0 or aid >= len(presentation['attachments']):
-        abort(404)
+    attachments = list(db.execute("""select * from attachment a where a.presentation_id = ?""", (pid,)))
     
-    attachment = presentation['attachments'][aid]
-    path = os.path.join(app.config['uploads_path'], attachment)
-    if os.path.isfile(path):
-        os.remove(path)
+    form = PresentationForm(data=presentation)
     
-    del presentation['attachments'][aid]
-    
-    # write back to "database"
-    with open(app.config['presentations_path'], 'w') as f:
-        json.dump(presentations, f, indent=4)
-       
-    flash('Attachment %s has been removed' % attachment)    
-    return redirect(url_for('edit', pid=pid))
-```
-2. Update the `edit` view to support uploading attachments:
-```python
-...
     if form.validate_on_submit():
-        
-        attachments = presentation['attachments']
+        # upload attachments
+        attachments = []
         if 'attachments' in request.files:
-            for f in request.files.getlist('attachments'):
-                filename = generate_file_name(f.filename)
-                f.save(os.path.join(app.config['uploads_path'], filename))
-                attachments.append(filename)
-        ...
-
-    return render_template('edit.html', form=form, p=presentation)
+           for f in request.files.getlist('attachments'):
+               filename = generate_file_name(f.filename)
+               f.save(os.path.join(app.config['uploads_path'], filename))
+               attachments.append(filename)
+        
+        db.execute("""update presentation set title = ?, presenters = ?,
+            scheduled = ?, time_range = ?, notes = ? where id=?""", 
+            [getattr(form, f).data for f in 
+            ('title', 'presenters', 'scheduled', 'time_range', 'notes')] + [pid])
+            
+        for a in attachments:
+            db.execute("""insert into attachment(presentation_id, filename)
+             values(?, ?)""", (pid, a))
+        
+        db.commit()
+        db.close()
+        
+        flash('Presentation has been edited')
+        return redirect(url_for('home'))
+    
+    db.close()
+    return render_template('edit.html', form=form, pid=pid, attachments=attachments)
 ```
-Note that we deliver the presentation object to the template, instead of just the id as before.
-3. Update the 'edit' template to show the list of attachments and allow users to remove them:
+4. Update the `delete` view to remove attachments when presentation is deleted:
+```python
+@app.route('/delete/<int:pid>', methods=('POST',))
+def delete(pid):
+    db = connect_db()
+
+    # remove attachments
+    attachments = db.execute("""select * from attachment a where a.presentation_id = ?""", (pid,))
+    for a in attachments:
+        path = os.path.join(app.config['uploads_path'], a['filename'])
+        if os.path.isfile(path):
+            os.remove(path)
+    db.execute("delete from attachment where presentation_id=?", (pid,))
+    
+    db.execute("""delete from presentation where id=?""", (pid,))
+    
+    
+    db.commit()
+    db.close()
+    flash('Presentation deleted.')
+    return redirect(url_for('home'))
+```
+
+3. Update  `edit.html` to show the list of attachments and allow users to remove them:
 ```html
-...
-<form action="{{ url_for('delete', pid=p['id']) }}" method="post">
+  <form method="post" enctype="multipart/form-data">
+   {{ form.csrf_token }}
+   
+   {% include "_presentation_form.html" %}
+   
+   <p><input type="submit" value="Done">
+  </form>
+  
+  <form action="{{ url_for('delete', pid=pid) }}" method="post">
     <input class="danger" type="submit" value="Delete" onclick="return confirm('Are you sure?');">
-</form>
-{% if p['attachments'] %}  
+  </form>
+  
+{% if attachments %}  
 <h2>Attachments</h2>
 <ul>
-    {% for a in p['attachments'] %}
+    {% for a in attachments %}
     <li>
-     <a href="{{ url_for('getfile', pid=p['id'], aid=loop.index-1) }}">{{ a }}</a>
-     <form method="post" action="{{ url_for('delete_attachment', pid=p['id'], aid=loop.index-1) }}">
+     <a href="{{ url_for('getfile', aid=a['id']) }}">{{ a['filename'] }}</a>
+     <form method="post" action="{{ url_for('delete_attachment', aid=a['id']) }}">
       <input class='danger' type='submit' value='Delete'>
      </form>
     </li>
     {% endfor %}
 </ul>
 {% endif %}
+
 ```
 Since `delete_attachment` is an operation which changes the database, we've marked as a `POST` operation. To send requests via `POST`, we have to use an HTML form. So we create one form for which attachment.
 
