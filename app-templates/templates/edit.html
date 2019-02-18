@@ -3,7 +3,7 @@
 {% block title %}Edit Presentation{% endblock %}
 
 {% block content %}
-  <form method="post">
+  <form method="post" enctype="multipart/form-data">
    {{ form.csrf_token }}
    
    {% include "_presentation_form.html" %}
@@ -11,7 +11,23 @@
    <p><input type="submit" value="Done">
   </form>
   
-  <form action="{{ url_for('delete', pid=pid) }}" method="post">
+  <form action="{{ url_for('delete', pid=p['id']) }}" method="post">
     <input class="danger" type="submit" value="Delete" onclick="return confirm('Are you sure?');">
   </form>
+
+{% if p['attachments'] %}  
+<h2>Attachments</h2>
+<ul>
+    {% for a in p['attachments'] %}
+    <li>
+     <a href="{{ url_for('getfile', pid=p['id'], aid=loop.index-1) }}">{{ a }}</a>
+     <form method="post" action="{{ url_for('delete_attachment', pid=p['id'], aid=loop.index-1) }}">
+      <input class='danger' type='submit' value='Delete'>
+     </form>
+    </li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+
 {% endblock %}

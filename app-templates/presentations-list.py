@@ -1,5 +1,5 @@
 from flask import Flask, render_template, abort, request, redirect, url_for, \
-    flash
+    flash, send_from_directory
 import json
 from forms import PresentationForm
 import datetime
@@ -86,15 +86,23 @@ def edit(pid):
         presentations = json.load(f) 
     
     presentation = next((p for p in presentations if p['id'] == pid), None)
-    presentation['scheduled'] = datetime.datetime.strptime(presentation['scheduled'], '%Y-%m-%d').date()
     
     if presentation is None:
         abort(404)
     
+    presentation['scheduled'] = datetime.datetime.strptime(presentation['scheduled'], '%Y-%m-%d').date()
+    
     form = PresentationForm(data=presentation)
     
     if form.validate_on_submit():
-    
+        
+        attachments = presentation['attachments']
+        if 'attachments' in request.files:
+            for f in request.files.getlist('attachments'):
+                filename = generate_file_name(f.filename)
+                f.save(os.path.join(app.config['uploads_path'], filename))
+                attachments.append(filename)
+
         for fname in ["title", "presenters", "scheduled", "time_range", "notes"]:
             presentation[fname] = getattr(form, fname).data
         presentation['scheduled'] = presentation['scheduled'].strftime('%Y-%m-%d')
@@ -106,7 +114,7 @@ def edit(pid):
         flash('Presentation has been edited')
         return redirect(url_for('home'))
         
-    return render_template('edit.html', form=form, pid=pid)
+    return render_template('edit.html', form=form, p=presentation)
     
 @app.route('/delete/<int:pid>', methods=('POST',))
 def delete(pid):
@@ -123,6 +131,53 @@ def delete(pid):
     flash('Presentation deleted.')
     return redirect(url_for('home'))
     
+@app.route('/delete_attachment/<int:pid>/<int:aid>', methods=('POST',))
+def delete_attachment(pid, aid):
+    
+    with open(app.config['presentations_path'], 'r') as f:
+        presentations = json.load(f) 
+
+    presentation = next((p for p in presentations if p['id'] == pid), None)
+
+    if presentation is None:
+        abort(404)
+    
+    if aid < 0 or aid >= len(presentation['attachments']):
+        abort(404)
+    
+    attachment = presentation['attachments'][aid]
+    path = os.path.join(app.config['uploads_path'], attachment)
+    if os.path.isfile(path):
+        os.remove(path)
+    
+    del presentation['attachments'][aid]
+    
+    # write back to "database"
+    with open(app.config['presentations_path'], 'w') as f:
+        json.dump(presentations, f, indent=4)
+       
+    flash('Attachment %s has been removed' % attachment)    
+    return redirect(url_for('edit', pid=pid))
+
+@app.route('/getfile/<int:pid>/<int:aid>', methods=('GET',))
+def getfile(pid, aid):
+    
+    with open(app.config['presentations_path'], 'r') as f:
+        presentations = json.load(f) 
+
+    presentation = next((p for p in presentations if p['id'] == pid), None)
+
+    if presentation is None:
+        abort(404)
+    
+    if aid < 0 or aid >= len(presentation['attachments']):
+        abort(404)
+    
+    attachment = presentation['attachments'][aid]
+    
+    return send_from_directory(app.config['uploads_path'], attachment, as_attachment=True)
+        
+
 def generate_file_name(filename):
     prefix = randstr(8)
     filename = '%s-%s' % (prefix, secure_filename(filename))

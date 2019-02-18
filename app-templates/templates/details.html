@@ -14,5 +14,14 @@
   
 <h2>Notes</h2>
 {{ p['notes']|safe }}
-  
+
+{% if p['attachments'] %}  
+<h2>Attachments</h2>
+<ul>
+    {% for a in p['attachments'] %}
+    <li><a href="{{ url_for('getfile', pid=p['id'], aid=loop.index-1) }}">{{ a }}</a></li>
+    {% endfor %}
+</ul>
+{% endif %}
+
 {% endblock %}

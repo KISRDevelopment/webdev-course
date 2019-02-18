@@ -985,10 +985,11 @@ def edit(pid):
         presentations = json.load(f) 
     
     presentation = next((p for p in presentations if p['id'] == pid), None)
-    presentation['scheduled'] = datetime.datetime.strptime(presentation['scheduled'], '%Y-%m-%d').date()
     
     if presentation is None:
         abort(404)
+    
+    presentation['scheduled'] = datetime.datetime.strptime(presentation['scheduled'], '%Y-%m-%d').date()
     
     form = PresentationForm(data=presentation)
     
@@ -1098,19 +1099,131 @@ if form.validate_on_submit():
 ```python
 attachments = FileField('Attachments')
 ```
-6. Update the form template in `_presentation_form.html`:
+Here the PresentationForm can be used to validate the name of the file, but we don't really care about that. We define a field so that the form can render it in the template.
+
+6. update the form template in `_presentation_form.html`:
 ```html
 {{ render_field(form.attachments) }}
 ```
-7. Change the `form` tag so that it supports file uploads in `create.html`:
+7. change the `form` tag so that it supports file uploads in `create.html`:
 ```html
 <form method="post" enctype="multipart/form-data">
 ```
-8. Try creating a presentation while uploading some files!
+8. update `details.html` so that it lists the uploaded attachments:
+```html
+{% if p['attachments'] %}  
+<h2>Attachments</h2>
+<ul>
+    {% for a in p['attachments'] %}
+    <li><a href="{{ url_for('getfile', pid=p['id'], aid=loop.index-1) }}">{{ a }}</a></li>
+    {% endfor %}
+</ul>
+{% endif %}
+```
+`loop.index` is a special Jinja variable that indicates the current index in the loop, starting from 1.
+
+9. add a route to get the attachment:
+```python
+from flask import Flask, render_template, abort, request, redirect, url_for, \
+    flash, send_from_directory
+...
+@app.route('/getfile/<int:pid>/<int:aid>', methods=('GET',))
+def getfile(pid, aid):
+    
+    with open(app.config['presentations_path'], 'r') as f:
+        presentations = json.load(f) 
+
+    presentation = next((p for p in presentations if p['id'] == pid), None)
+
+    if presentation is None:
+        abort(404)
+    
+    if aid < 0 or aid >= len(presentation['attachments']):
+        abort(404)
+    
+    attachment = presentation['attachments'][aid]
+    
+    return send_from_directory(app.config['uploads_path'], attachment, as_attachment=True)
+```
+The last `send_from_directory` function provides a secure way to deliver an attachment to the browser. It splits the file path into a directory and a filename so that malicious users cannot specify paths like `./uploads/../secret_file`. Of course, in our case this is not much of a problem because we vet the attachment file names before they get inserted into the database.
+
+10. You can now try uploading files with a new presentation and they will show up when you view the details page. 
+
+We now need to update the edit view so that it allows uploading new files and removing existing ones. There are no new concepts here, so let's quickly zip through it:
+
+1. Add a route to delete attachments:
+```python
+@app.route('/delete_attachment/<int:pid>/<int:aid>', methods=('POST',))
+def delete_attachment(pid, aid):
+    
+    with open(app.config['presentations_path'], 'r') as f:
+        presentations = json.load(f) 
+
+    presentation = next((p for p in presentations if p['id'] == pid), None)
+
+    if presentation is None:
+        abort(404)
+    
+    if aid < 0 or aid >= len(presentation['attachments']):
+        abort(404)
+    
+    attachment = presentation['attachments'][aid]
+    path = os.path.join(app.config['uploads_path'], attachment)
+    if os.path.isfile(path):
+        os.remove(path)
+    
+    del presentation['attachments'][aid]
+    
+    # write back to "database"
+    with open(app.config['presentations_path'], 'w') as f:
+        json.dump(presentations, f, indent=4)
+       
+    flash('Attachment %s has been removed' % attachment)    
+    return redirect(url_for('edit', pid=pid))
+```
+2. Update the `edit` view to support uploading attachments:
+```python
+...
+    if form.validate_on_submit():
+        
+        attachments = presentation['attachments']
+        if 'attachments' in request.files:
+            for f in request.files.getlist('attachments'):
+                filename = generate_file_name(f.filename)
+                f.save(os.path.join(app.config['uploads_path'], filename))
+                attachments.append(filename)
+        ...
+
+    return render_template('edit.html', form=form, p=presentation)
+```
+Note that we deliver the presentation object to the template, instead of just the id as before.
+3. Update the 'edit' template to show the list of attachments and allow users to remove them:
+```html
+...
+<form action="{{ url_for('delete', pid=p['id']) }}" method="post">
+    <input class="danger" type="submit" value="Delete" onclick="return confirm('Are you sure?');">
+</form>
+{% if p['attachments'] %}  
+<h2>Attachments</h2>
+<ul>
+    {% for a in p['attachments'] %}
+    <li>
+     <a href="{{ url_for('getfile', pid=p['id'], aid=loop.index-1) }}">{{ a }}</a>
+     <form method="post" action="{{ url_for('delete_attachment', pid=p['id'], aid=loop.index-1) }}">
+      <input class='danger' type='submit' value='Delete'>
+     </form>
+    </li>
+    {% endfor %}
+</ul>
+{% endif %}
+```
+Since `delete_attachment` is an operation which changes the database, we've marked as a `POST` operation. To send requests via `POST`, we have to use an HTML form. So we create one form for which attachment.
+
+Edit some presentations by uploading new attachments or removing existing ones.
+
 
 
 TODO:
-* uploads
 * SQL
 * authentication and authorization
 
