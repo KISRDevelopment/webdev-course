@@ -833,7 +833,7 @@ class PresentationForm(FlaskForm):
     title = StringField('Title', validators=[vals.Length(min=4, message="Title has to be at least 4 characters long")])
     presenters = StringField('Presenter(s)', validators=[
         vals.Length(min=4, message="List of presenters has to be at least 4 alphabetical characters long"), 
-        vals.Regexp(r'^[a-zA-Z\s&]+$', message="Only alphabetical characters are allowed in the presenters list")
+        vals.Regexp(r'^[a-zA-Z\s&\-\.]+$', message="Only alphabetical characters are allowed in the presenters list")
     ])
     scheduled = DateField('Date', validators=[vals.DataRequired()])
     time_range = StringField('Time', validators=[vals.DataRequired(), range_validator])
@@ -889,8 +889,7 @@ def create():
 * `validate_on_submit()` returns `True` if the request is `POST` and all fields are valid, and `False` otherwise.
 * The class attributes we defiend in `PresentationForm` contain submission data, but we cannot access them dynamically with `form[f]`. To access object attributes in Python dynamically, use the `getattr(obj, attrname)` function.
 * Each class attribute in `PresentationForm` has a `data` attribute which contains the submitted value. We can use the `request.form[f]` as before but sometimes, the form class will do extra _sanitization_ on the submitted values so it is a good idea to use the value in the form, not the request.
-* The `Date` field helpfully converts the scheduled filed into a Python `date` object. But the `json` module cannot serialize `date` objects so for now, we manually coerce the scheduled field into a string with `strftime()`. 
-* We deliver the `form` itself to the template context.
+* We deliver the `form` itself to the template context so that we can display fields and show errors.
 
 4. Change the `create.html` template:
 ```html
@@ -947,7 +946,7 @@ hello
 * The CSRF token is one mitigation strategy: the server generates a random token, hashes it, and stores it in the user's session (cookie). When recieving a request, the server hashes the token in the request and compares the hash with the value stored in the session. If the two values don't match, the request is rejected. This is why we need to generate a CSRF hidden field: so that the server can be sure that the request is valid. Note that this whole scheme depends on good encryption and on the browser not having access to the cookie.
 * By default `Flask-WTF` demands that a CSRF token is included with any form.
 
-5. Phew! that was quite a few digressions, but it is important to understand what the code does. Try to create a new presentation and make sure the validation still works.
+5. Phew! those were quite a few digressions, but it is important to understand what the code does. Try to create a new presentation and make sure the validation still works.
 
 # Edit and Delete Operations
 
@@ -955,7 +954,7 @@ Users many need to edit a presentation's details after it's been added due to re
 
 > **Refactoring** refers to improving code structure without changing function.
 
-1. create a template `_presentation_form.html` with the following content:
+1. Create a template `_presentation_form.html` with the following content:
 ```html
 {% macro render_field(field) %}
   <dt>{{ field.label }}</dt>
@@ -978,7 +977,7 @@ Users many need to edit a presentation's details after it's been added due to re
     {{ render_field(form.notes) }}
 </dl>
 ```
-2. change `create.html` to:
+2. Change `create.html`:
 ```html
 {% extends 'base.html' %}
 
@@ -998,7 +997,7 @@ Users many need to edit a presentation's details after it's been added due to re
 {% endblock %}
 ```
 * The `{% include %}` statement renders the target template within the _current_ active context and puts the result where the statement is. Since `form`  can be accessed from the current context, so can it in `_presentation_form.html`.
-3. create `edit.html` with the following content:
+3. Create `edit.html`:
 ```html
 {% extends 'base.html' %}
 
@@ -1020,68 +1019,60 @@ Users many need to edit a presentation's details after it's been added due to re
 {% endblock %}
 ```
 * Not much is going here. The edit form is similar to the create form. We add another form who's target is the delete action. There is a bit of inline Javascript that confirms that the user really wants to delete the presentation when he or she clicks the delete button. 
-4. add the `edit` and `delete` view functions:
+4. Add the `edit` and `delete` view functions:
 ```python
 @app.route('/edit/<int:pid>', methods=('GET', 'POST'))
 def edit(pid):
-    with open(app.config['presentations_path'], 'r') as f:
-        presentations = json.load(f) 
-    
-    presentation = next((p for p in presentations if p['id'] == pid), None)
-    
+    db = connect_db()
+    presentation = db.execute("""select * from presentation p where p.id = ?""", (pid,)).fetchone()
+
     if presentation is None:
         abort(404)
-    
-    presentation['scheduled'] = datetime.datetime.strptime(presentation['scheduled'], '%Y-%m-%d').date()
     
     form = PresentationForm(data=presentation)
     
     if form.validate_on_submit():
-    
-        for fname in ["title", "presenters", "scheduled", "time_range", "notes"]:
-            presentation[fname] = getattr(form, fname).data
-        presentation['scheduled'] = presentation['scheduled'].strftime('%Y-%m-%d')
-        
-        # write back to "database"
-        with open(app.config['presentations_path'], 'w') as f:
-            json.dump(presentations, f, indent=4)
+        db.execute("""update presentation set title = ?, presenters = ?,
+            scheduled = ?, time_range = ?, notes = ? where id=?""", 
+            [getattr(form, f).data for f in 
+            ('title', 'presenters', 'scheduled', 'time_range', 'notes')] + [pid])
+        db.commit()
+        db.close()
         
         flash('Presentation has been edited')
         return redirect(url_for('home'))
-        
+    
+    db.close()
     return render_template('edit.html', form=form, pid=pid)
     
 @app.route('/delete/<int:pid>', methods=('POST',))
 def delete(pid):
-    
-    with open(app.config['presentations_path'], 'r') as f:
-        presentations = json.load(f) 
-    
-    presentations = [p for p in presentations if p['id'] != pid]
-    
-    # write back to "database"
-    with open(app.config['presentations_path'], 'w') as f:
-        json.dump(presentations, f, indent=4)
-       
+    db = connect_db()
+    db.execute("""delete from presentation where id=?""", (pid,))
+    db.commit()
+    db.close()
     flash('Presentation deleted.')
     return redirect(url_for('home'))
 ```
-* the `edit` function finds the requested presentation, prepopulates the form with its data, validates the `POST` request&mdash;if applicable&mdash;and either makes the edit or displays the form. Some annoying `date` conversions occur because the `PresentationForm` class expects a `DateField` which requires the data coming from the database to have type `date`. So some type gymnastics are necessary to make the class happy with the date type.
-* the `delete` function simply filters the list of presentation by excluding the requested presentation id. It then redirects back to home page.
+* the `edit` function finds the requested presentation, prepopulates the form with its data, validates the `POST` request&mdash;if applicable&mdash;and either makes the edit or displays the form. Notice how in `db.execute(...)`, we are concatenating two lists: the list of values to update and a list of one element: the presentation ID.
 5. Navigate to `localhost:5000/edit/1` and try editing or deleting the presentation. Try it for other presentations as well.
 
-As you may have noticed, having to manually enter `create` and `edit` urls is tiresome. Let's add some friendly links:
+Having to manually enter `create` and `edit` urls is tiresome. Let's add some friendly links:
 
 1. modify `home.html`:
 ```html
 {% block content %}
-<a href='{{ url_for("create") }}' class='btn-txt'>Add a Presentation</a>
+<p class='centered-text'>
+ <a href='{{ url_for("create") }}' class='btn-txt'>Add a Presentation</a>
+</p>
 ...
 ```
 2. modify `details.html`:
 ```html
 {% block content %}
-<a href='{{ url_for("edit", pid=p["id"]) }}' class='btn-txt'>Edit</a>
+<p class='centered-text'>
+ <a href='{{ url_for("edit", pid=p["id"]) }}' class='btn-txt'>Edit</a>
+</p>
 ...
 ```
 
@@ -1263,244 +1254,3 @@ Note that we deliver the presentation object to the template, instead of just th
 Since `delete_attachment` is an operation which changes the database, we've marked as a `POST` operation. To send requests via `POST`, we have to use an HTML form. So we create one form for which attachment.
 
 Edit some presentations by uploading new attachments or removing existing ones.
-
-# Cleaning Up
-
-There is quite a bit of duplication in our "database" access and manipulation logic. So it is refactoring time! 
-
-1. Create a new file `db.py` and put the following in it:
-```python
-import json
-from flask import current_app, g
-import datetime
-
-def get_db():
-    
-    if 'db' not in g:
-        with open(current_app.config['presentations_path'], 'r') as f:
-            g.db = json.load(f)
-
-        # convert date string into an actual datetime object
-        for p in g.db:    
-            p['scheduled'] = datetime.datetime.strptime(p['scheduled'], '%Y-%m-%d').date()
-    
-    return g.db
-
-def close_db(error):
-    # removes an attribute by name
-    db = g.pop('db', None)
-    
-    if db is None:
-        return
-
-    # back to a string ... 
-    for p in db:
-        p['scheduled'] = p['scheduled'].strftime('%Y-%m-%d')
-
-    # commit transactions
-    if db is not None:
-        with open(current_app.config['presentations_path'], 'w') as f:
-            json.dump(db, f, indent=4, ensure_ascii=False)
-    
-def get_presentations():    
-    db = get_db()
-    return db
-
-def get_presentation(pid):
-    db = get_db()
-    
-    presentation = next((p for p in db if p['id'] == pid), None)
-
-    return presentation
-
-
-def create_presentation(new_pres):
-
-    db = get_db()
-    
-    # compute next id to use
-    next_id = 1
-    if len(db) > 0:
-        next_id = db[-1]["id"] + 1
-    
-    new_pres['id'] = next_id
-    
-    db.append(new_pres)
-
-def update_presentation(pres):
-    db = get_db()
-    for i in range(len(db)):
-        p = db[i]
-        if p['id'] == pres['id']:
-            db[i] = pres
-            break
-
-def delete_presentation(pid):
-    db = get_db()
-    for i in range(len(db)):
-        if db[i]['id'] == pid:
-            p = db[i]            
-            del db[i]
-            return p
-    return None
-
-def delete_attachment(pid, aid):
-    pres = get_presentation(pid)
-    if not pres or aid < 0 or aid >= len(pres['attachments']):
-        return None
-    fname = pres['attachments'][aid]
-
-    del pres['attachments'][aid]
-
-    return fname
-
-def get_attachment(pid, aid):
-    pres = get_presentation(pid)
-    if not pres or aid < 0 or aid >= len(pres['attachments']):
-        return None
-    return pres['attachments'][aid]
-```
-* different parts of a web application often need to access shared data: configuration, database objects, internationalization strings, etc. Passing this information around to every module and every function would get ugly fast. Instead, Flask provides application and request contexts which are created when a new request arrives. Within an application context, the variable `curernt_app` refers to the currently executing application (so you can access config info like `current_app.config['uploads_path']`), and `g` refers to the data that is stored with the current request (e.g., the database object). The `request` object refers to the request data (e.g., form data) that is associated with the current request. Typically, all three objects have the same lifetime.
-> understanding app contexts may not be too important if you are just writing production code; after all, you just need to remember to import `current_app`, `g`, and `request`. But it matters when writing tests as there is no implicitly defined application context there. It also becomes important when writing _blueprints_ which are reusable subapplications.
-* in `get_db()` we see if the database has already been opened. If it hasn't we open and store the result in `g.db`. Otherwise, we just return `g.db`.
-* in `teardown_db()` we remove the `db` attribute from `g` and we write the JSON database back to disk. We'll arrange for `teardown_db()` to be called when the request ends. 
-* all functions are self explanatory: they implement logic to create, update, and delete presentations (CRUD) and to retrieve presentations.
-
-2. Modify `presentations-list.p`:
-```python
-from flask import Flask, render_template, abort, request, redirect, url_for, \
-    flash, send_from_directory
-import json
-from forms import PresentationForm
-import datetime
-import random
-import os
-from werkzeug.utils import secure_filename
-import string
-import db
-
-app = Flask(__name__)
-app.config['presentations_path'] = 'presentations.json'
-app.config['uploads_path'] = './uploads/'
-app.secret_key = b'xYFRlEs3@a'
-app.teardown_appcontext(db.close_db)
-
-@app.route('/')
-def home():
-    presentations = db.get_presentations()
-    return render_template('home.html', presentations=presentations)
-    
-    
-@app.route('/presentation/<int:pid>')
-def details(pid):
-    presentation = db.get_presentation(pid)
-    if presentation is None:
-        abort(404)
-    
-    return render_template('details.html', p=presentation)
-    
-@app.route('/create', methods=('GET','POST'))
-def create():
-    
-    form = PresentationForm()
-    
-    if form.validate_on_submit():
-        
-        # upload attachments
-        attachments = []
-        if 'attachments' in request.files:
-           
-           for f in request.files.getlist('attachments'):
-               filename = generate_file_name(f.filename)
-               f.save(os.path.join(app.config['uploads_path'], filename))
-               attachments.append(filename)
-
-        # create new presentation record
-        new_pres = {
-            "attachments" : attachments
-        }
-        for fname in ["title", "presenters", "scheduled", "time_range", "notes"]:
-            new_pres[fname] = getattr(form, fname).data
-        db.create_presentation(new_pres)        
-
-        flash('Presentation has been added')
-        return redirect(url_for('home'))
-    
-    return render_template('create.html', form=form)
-
-@app.route('/edit/<int:pid>', methods=('GET', 'POST'))
-def edit(pid):
-    presentation = db.get_presentation(pid)
-    if presentation is None:
-        abort(404)
-    
-    form = PresentationForm(data=presentation)
-    
-    if form.validate_on_submit():
-        
-        attachments = presentation['attachments']
-        if 'attachments' in request.files:
-            for f in request.files.getlist('attachments'):
-                filename = generate_file_name(f.filename)
-                f.save(os.path.join(app.config['uploads_path'], filename))
-                attachments.append(filename)
-
-        for fname in ["title", "presenters", "scheduled", "time_range", "notes"]:
-            presentation[fname] = getattr(form, fname).data
-        
-        db.update_presentation(presentation)
-        
-        flash('Presentation has been edited')
-        return redirect(url_for('home'))
-        
-    return render_template('edit.html', form=form, p=presentation)
-    
-@app.route('/delete/<int:pid>', methods=('POST',))
-def delete(pid):
-    pres = db.delete_presentation(pid)
-
-    if pres:
-        for a in pres['attachments']:
-            _remove_file(a)
-
-    flash('Presentation deleted.')
-    return redirect(url_for('home'))
-    
-@app.route('/delete_attachment/<int:pid>/<int:aid>', methods=('POST',))
-def delete_attachment(pid, aid):
-    
-    filename = db.delete_attachment(pid, aid)
-    if not filename:
-        abort(404)
-    
-    _remove_file(filename)
-    
-    flash('Attachment %s has been removed' % filename)    
-    return redirect(url_for('edit', pid=pid))
-
-@app.route('/getfile/<int:pid>/<int:aid>', methods=('GET',))
-def getfile(pid, aid):
-    
-    attachment = db.get_attachment(pid, aid)
-    if not attachment:
-        abort(404)
-
-    return send_from_directory(app.config['uploads_path'], attachment, as_attachment=True)
-
-def generate_file_name(filename):
-    prefix = randstr(8)
-    filename = '%s-%s' % (prefix, secure_filename(filename))
-    return filename
-
-def randstr(N):
-    return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(N))
-
-def _remove_file(filename):
-    path = os.path.join(app.config['uploads_path'], filename)
-    if os.path.isfile(path):
-        os.remove(path)
-```
-* the `app.teardown_appcontext(db.close_db)` line tells the framework to call `close_db` when the request is finished. In our case, `close_db` writes out the JSON database.
-* the file structure now is much simpler because most of the db logic has been isolated from the view logic.
-
-3. Test the app to make sure it still works.

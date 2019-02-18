@@ -41,8 +41,7 @@ def create():
     if form.validate_on_submit():
         
         db = connect_db()
-        cursor = db.cursor()
-        cursor.execute("""insert into presentation(title, presenters, scheduled, time_range, notes)
+        db.execute("""insert into presentation(title, presenters, scheduled, time_range, notes)
             values(?, ?, ?, ?, ?)""", 
             [getattr(form, f).data for f in 
             ('title', 'presenters', 'scheduled', 'time_range', 'notes')])
@@ -54,6 +53,39 @@ def create():
         return redirect(url_for('home'))
     
     return render_template('create.html', form=form)
+   
+@app.route('/edit/<int:pid>', methods=('GET', 'POST'))
+def edit(pid):
+    db = connect_db()
+    presentation = db.execute("""select * from presentation p where p.id = ?""", (pid,)).fetchone()
+
+    if presentation is None:
+        abort(404)
+    
+    form = PresentationForm(data=presentation)
+    
+    if form.validate_on_submit():
+        db.execute("""update presentation set title = ?, presenters = ?,
+            scheduled = ?, time_range = ?, notes = ? where id=?""", 
+            [getattr(form, f).data for f in 
+            ('title', 'presenters', 'scheduled', 'time_range', 'notes')] + [pid])
+        db.commit()
+        db.close()
+        
+        flash('Presentation has been edited')
+        return redirect(url_for('home'))
+    
+    db.close()
+    return render_template('edit.html', form=form, pid=pid)
+    
+@app.route('/delete/<int:pid>', methods=('POST',))
+def delete(pid):
+    db = connect_db()
+    db.execute("""delete from presentation where id=?""", (pid,))
+    db.commit()
+    db.close()
+    flash('Presentation deleted.')
+    return redirect(url_for('home'))
     
 def connect_db():
     

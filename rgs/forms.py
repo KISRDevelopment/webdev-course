@@ -13,7 +13,7 @@ class PresentationForm(FlaskForm):
     title = StringField('Title', validators=[vals.Length(min=4, message="Title has to be at least 4 characters long")])
     presenters = StringField('Presenter(s)', validators=[
         vals.Length(min=4, message="List of presenters has to be at least 4 alphabetical characters long"), 
-        vals.Regexp(r'^[a-zA-Z\s&]+$', message="Only alphabetical characters are allowed in the presenters list")
+        vals.Regexp(r'^[a-zA-Z\s&\-\.]+$', message="Only alphabetical characters are allowed in the presenters list")
     ])
     scheduled = DateField('Date', validators=[vals.DataRequired()])
     time_range = StringField('Time', validators=[vals.DataRequired(), range_validator])
