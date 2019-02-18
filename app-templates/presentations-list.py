@@ -7,29 +7,23 @@ import random
 import os
 from werkzeug.utils import secure_filename
 import string
+import db
+
 app = Flask(__name__)
 app.config['presentations_path'] = 'presentations.json'
 app.config['uploads_path'] = './uploads/'
 app.secret_key = b'xYFRlEs3@a'
+app.teardown_appcontext(db.close_db)
 
 @app.route('/')
 def home():
-    
-    with open(app.config['presentations_path'], 'r') as f:
-        presentations = json.load(f)
-    
+    presentations = db.get_presentations()
     return render_template('home.html', presentations=presentations)
     
     
 @app.route('/presentation/<int:pid>')
 def details(pid):
-    
-    with open(app.config['presentations_path'], 'r') as f:
-        presentations = json.load(f)
-        
-    # find the first presentation that matches pid, otherwise return None
-    presentation = next((p for p in presentations if p['id'] == pid), None)
-    
+    presentation = db.get_presentation(pid)
     if presentation is None:
         abort(404)
     
@@ -51,30 +45,14 @@ def create():
                f.save(os.path.join(app.config['uploads_path'], filename))
                attachments.append(filename)
 
-               
-        with open(app.config['presentations_path'], 'r') as f:
-            presentations = json.load(f) 
-            
-        # compute next id to use
-        next_id = 1
-        if len(presentations) > 0:
-            next_id = presentations[-1]["id"] + 1
-        
         # create new presentation record
         new_pres = {
-            "id" : next_id,
             "attachments" : attachments
         }
         for fname in ["title", "presenters", "scheduled", "time_range", "notes"]:
             new_pres[fname] = getattr(form, fname).data
-        new_pres['scheduled'] = new_pres['scheduled'].strftime('%Y-%m-%d')
+        db.create_presentation(new_pres)        
 
-        presentations.append(new_pres)
-        
-        # write back to "database"
-        with open(app.config['presentations_path'], 'w') as f:
-            json.dump(presentations, f, indent=4)
-        
         flash('Presentation has been added')
         return redirect(url_for('home'))
     
@@ -82,15 +60,9 @@ def create():
 
 @app.route('/edit/<int:pid>', methods=('GET', 'POST'))
 def edit(pid):
-    with open(app.config['presentations_path'], 'r') as f:
-        presentations = json.load(f) 
-    
-    presentation = next((p for p in presentations if p['id'] == pid), None)
-    
+    presentation = db.get_presentation(pid)
     if presentation is None:
         abort(404)
-    
-    presentation['scheduled'] = datetime.datetime.strptime(presentation['scheduled'], '%Y-%m-%d').date()
     
     form = PresentationForm(data=presentation)
     
@@ -105,11 +77,8 @@ def edit(pid):
 
         for fname in ["title", "presenters", "scheduled", "time_range", "notes"]:
             presentation[fname] = getattr(form, fname).data
-        presentation['scheduled'] = presentation['scheduled'].strftime('%Y-%m-%d')
         
-        # write back to "database"
-        with open(app.config['presentations_path'], 'w') as f:
-            json.dump(presentations, f, indent=4)
+        db.update_presentation(presentation)
         
         flash('Presentation has been edited')
         return redirect(url_for('home'))
@@ -118,65 +87,35 @@ def edit(pid):
     
 @app.route('/delete/<int:pid>', methods=('POST',))
 def delete(pid):
-    
-    with open(app.config['presentations_path'], 'r') as f:
-        presentations = json.load(f) 
-    
-    presentations = [p for p in presentations if p['id'] != pid]
-    
-    # write back to "database"
-    with open(app.config['presentations_path'], 'w') as f:
-        json.dump(presentations, f, indent=4)
-       
+    pres = db.delete_presentation(pid)
+
+    if pres:
+        for a in pres['attachments']:
+            _remove_file(a)
+
     flash('Presentation deleted.')
     return redirect(url_for('home'))
     
 @app.route('/delete_attachment/<int:pid>/<int:aid>', methods=('POST',))
 def delete_attachment(pid, aid):
     
-    with open(app.config['presentations_path'], 'r') as f:
-        presentations = json.load(f) 
-
-    presentation = next((p for p in presentations if p['id'] == pid), None)
-
-    if presentation is None:
+    filename = db.delete_attachment(pid, aid)
+    if not filename:
         abort(404)
     
-    if aid < 0 or aid >= len(presentation['attachments']):
-        abort(404)
+    _remove_file(filename)
     
-    attachment = presentation['attachments'][aid]
-    path = os.path.join(app.config['uploads_path'], attachment)
-    if os.path.isfile(path):
-        os.remove(path)
-    
-    del presentation['attachments'][aid]
-    
-    # write back to "database"
-    with open(app.config['presentations_path'], 'w') as f:
-        json.dump(presentations, f, indent=4)
-       
-    flash('Attachment %s has been removed' % attachment)    
+    flash('Attachment %s has been removed' % filename)    
     return redirect(url_for('edit', pid=pid))
 
 @app.route('/getfile/<int:pid>/<int:aid>', methods=('GET',))
 def getfile(pid, aid):
     
-    with open(app.config['presentations_path'], 'r') as f:
-        presentations = json.load(f) 
-
-    presentation = next((p for p in presentations if p['id'] == pid), None)
-
-    if presentation is None:
+    attachment = db.get_attachment(pid, aid)
+    if not attachment:
         abort(404)
-    
-    if aid < 0 or aid >= len(presentation['attachments']):
-        abort(404)
-    
-    attachment = presentation['attachments'][aid]
-    
+
     return send_from_directory(app.config['uploads_path'], attachment, as_attachment=True)
-        
 
 def generate_file_name(filename):
     prefix = randstr(8)
@@ -185,4 +124,8 @@ def generate_file_name(filename):
 
 def randstr(N):
     return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(N))
-    
+
+def _remove_file(filename):
+    path = os.path.join(app.config['uploads_path'], filename)
+    if os.path.isfile(path):
+        os.remove(path)
