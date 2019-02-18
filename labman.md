@@ -607,8 +607,6 @@ Both templates inherit from `base.html` and override the parent's blocks.
 
 # Our First Form: Creating a Presentation
 
-So far, the application is merely transforming a JSON representation to an HTML one. For the app to be useful, users should be able to add, edit, and remove presentations.
-
 1. Create a new template `create.html` with the following content:
 
 ```html
@@ -617,7 +615,6 @@ So far, the application is merely transforming a JSON representation to an HTML 
 {% block title %}Add a Presentation{% endblock %}
 
 {% block content %}
-
 <form method="post">
 
 <dl>
@@ -632,12 +629,15 @@ So far, the application is merely transforming a JSON representation to an HTML 
 
     <dt><label for="time_range">Time</label></dt>
     <dd><input id="time_range" required  name="time_range" type="text" value=""/></dd>
+    
+    <dt><label for="notes">Notes</label></dt>
+    <dd><textarea name="notes" cols="40" rows="5">{{ request.form['notes'] }}</textarea></dd>
+    
 </dl>
 
 <p><input type="submit" value="Add"/></p>
 
 </form>
-
 {% endblock %}
 ```
 The `form` tag has a `post` method because we intend to change the data on the server. There are two common methods in the HTTP protocol: `GET` and `POST`, information submitted over `GET` is directly encoded into the request URL (as query string parameters, e.g., `search?keywords=hello+world`), while data submitted over `POST` is included in the body of the HTTP request. For this reason, `GET` requests should only be used to retrieve information, while `POST` requests should be used for operations that cause side-effects.
@@ -656,37 +656,28 @@ By default, Flask views only accept `GET` requests. Here, we tell it to allow `P
 ```python
 from flask import Flask, render_template, abort, request, redirect, url_for
 ...
-@app.route('/create', methods=('GET','POST'))
+@app.route('/create', methods=('GET', 'POST'))
 def create():
-    
+
     if request.method == 'POST':
-        with open(app.config['presentations_path'], 'r') as f:
-            presentations = json.load(f) 
-            
-        # compute next id to use
-        next_id = 1
-        if len(presentations) > 0:
-            next_id = presentations[-1]["id"] + 1
         
-        # create new presentation record
-        new_pres = {
-            "id" : next_id,
-            "attachments" : []
-        }
-        for field in ["title", "presenters", "scheduled", "time_range", "notes"]:
-            new_pres[field] = request.form[field]
+        db = connect_db()
+        cursor = db.cursor()
+        cursor.execute("""insert into presentation(title, presenters, scheduled, time_range, notes)
+            values(?, ?, ?, ?, ?)""", 
+            [request.form[f] for f in 
+            ('title', 'presenters', 'scheduled', 'time_range', 'notes')])
         
-        presentations.append(new_pres)
-        
-        # write back to "database"
-        with open(app.config['presentations_path'], 'w') as f:
-            json.dump(presentations, f, indent=4)
-        
+        db.commit()
+        db.close()
         return redirect(url_for('home'))
     
     return render_template('create.html')
 ```
-It is common practice to have a form view like `create` handle both `GET` and `POST` requests. If the request method is `POST`, we load our "database" from the JSON file, compute the next record ID to use, create a new record for the submission, and write back to the JSON file (I know, it is pretty dumb to write the whole database back on each submission, but I am putting off the inevitable&mdash;SQL databases&mdash;for instructional purposes). Finally, we issue a redirect response to the browser via the `redirect` function to redirect the user back to the home view. Make no mistake about what is happening here: you are not calling the `home` function directly; rather, Flask is telling the browser to navigate to a new URL, and it is the browser which will then make a new request to the `home` view.
+* It is common practice to have a form view like `create` handle both `GET` and `POST` requests.
+* If the request is `POST`, we insert the new presentation into the database. Notice that we are using the _placeholder_ syntax in the `cursor.execute()` function, where the values to be inserted are replaced with question marks. The actual values are supplied as a list in the second argument. This allows the library to secure the inserted values and protect you from SQL Injection attacks. 
+* `commit()` saves the changes to the database
+* `redirect(url)` tells the browser to navigate to `url`. So in this case, we're telling the browser to navigate to the `home` view. Make no mistake about what is happening here: you are not calling the `home` function directly; rather, Flask is telling the browser to navigate to a new URL, and it is the browser which will then make a new request to the `home` view.
 
 What if the form is missing some fields? for example, if the field `title` does not exist in the form, then `request.form['title']` will raise an exception and Flask will return a 400 Bad Request error, which is good because missing fields may indicate that any attacker is trying to bypass the user interface and send data directly, so we don't need to show them a friendly error page.
 
@@ -696,8 +687,8 @@ A nice UI pattern that solves the lack of feedback is to show a _flash message_ 
 
 Cookies are small containers (4KB max) of data that are exchanged between the browser and the server. They are sent to the server on every request and can be manipulated both on the server (Flask) and the client sides (i.e., from Javascript on the browser). So how are cookies useful for flashing messages? the idea is to set a cookie before redirecting the browser, and then to have the `home` view read it&mdash;like a boomerang cookie. So let's do it:
 
-1. add `flash` to the list of names important from the `flask` module in `presentations-list.py`
-2. add the following just before the `redirect()` function call in the `create` view:
+1. Add `flash` to the list of names important from the `flask` module in `rgsapp.py`
+2. Add the following just before the `redirect()` function call in the `create` view:
 ```python
 flash('Presentation has been added')
 ```
@@ -717,7 +708,7 @@ This statement will append a message to the list of flash messages in the cookie
 ```
 The `{% with %}` Jinja statement establishes an _inner scope_. All variables defined within that scope will not be available outside it. In this example, the `messages` variable will not be available after `{% endwidth %}`. The `get_flashed_messages()` function is another function that Flask makes available by default in the template's context. It retrieves the list of flash messages from the cookie. We then display this list with standard Jinja statements.
 
-If you try to create a new presentation and hit submit, you will see a `RuntimeError: The session is unavailable because no secret key was set`. Flask implements `sessions` which persist user information across requests. However, for security purposes, Flask _signs_ the cookies via secret key. Signing refers to computing a hash&mdash;the signature&mdash;of the value of the cookie, using the secret key. When the cookie is sent to the server, Flask hashes the received value and compares it against the signature. If they do not match, Flask discards the request. In short, we need to define a hard secret key for our app to use when signing cookies. Add the following to `presentations-list.py` under `app.config['presentations_path'] = 'presentations.json'`:
+If you try to create a new presentation and hit submit, you will see a `RuntimeError: The session is unavailable because no secret key was set`. Flask implements `sessions` which persist user information across requests. However, for security purposes, Flask _signs_ the cookies via secret key. Signing refers to computing a hash&mdash;the signature&mdash;of the value of the cookie, using the secret key. When the cookie is sent to the server, Flask hashes the received value and compares it against the signature. If they do not match, Flask discards the request. In short, we need to define a hard secret key for our app to use when signing cookies. Add the following to `rgsapp.py`:
 ```python
 app.secret_key = b'xYFRlEs3@a'
 ```
@@ -738,7 +729,8 @@ The input validation process is as follows:
 3. If there are no errors, save and redirect as usual
 4. If the request is GET, display the form.
 
-So let's implement the necessary changes for this process:
+## The Manual Way
+So let's implement the necessary changes:
 
 1. update the `content` block `create.html` as follows:
 ```html
@@ -776,7 +768,7 @@ So let's implement the necessary changes for this process:
 We've added a block that lists any errors, and we've 
 pre-populated form inputs with request form values. The `request` object is another object that Flask makes available by default in the template's context.  Notice how we stripped the `safe` filter for the notes input; we really want just text in the textarea, no active HTML.
 
-2. add the following function to the end of `presentations-list.py`:
+2. Add the following function to the end of `rgsapp.py`:
 ```python
 def validate_onsubmit():
     if request.method == 'GET':
@@ -804,9 +796,9 @@ import re
 
 range_regex = re.compile(r"^(?P<fromhour>\d{1,2})\s*(:\s*(?P<fromminute>\d{1,2}))?\s*(?P<fromampm>am|pm)?\s*\-\s*(?P<tohour>\d{1,2})\s*(:\s*(?P<tominute>\d{1,2}))?\s*(?P<toampm>am|pm)?$", flags=re.IGNORECASE)
 ```
-Let's unpack steps 2 and 3. The `validate_onsubmit` function returns two things: whether a valid form has been submitted, and the list of errors if any. The function uses regular expressions functionality from Python's `re` module. The Regular expressions language is a specialized pattern-matching tool that originated from Perl. Whole books have been written on them and so discussing them is beyond the scope of this course. Just as an example though, `r'\d{4}\-\d{2}\-\d{2}'` matches four digits, followed by a dash, followed by two digits, followed by dash, and followed by two digits. The `r'...'` syntax defines a Python _raw_ string, which interprets the string as-is: backslashes `\` do not need escaping and escape sequences such as newlines `\n` are not replaced. Raw strings are commonly used for regular expressions because regexes make heavy use of backslahes. 
+* The `validate_onsubmit` function returns two things: whether a valid form has been submitted, and the list of errors if any. The function uses regular expressions functionality from Python's `re` module. The Regular expressions language is a specialized pattern-matching tool that originated from Perl. Whole books have been written on them and so discussing them is beyond the scope of this course. Just as an example though, `r'\d{4}\-\d{2}\-\d{2}'` matches four digits, followed by a dash, followed by two digits, followed by dash, and followed by two digits. The `r'...'` syntax defines a Python _raw_ string, which interprets the string as-is: backslashes `\` do not need escaping and escape sequences such as newlines `\n` are not replaced. Raw strings are commonly used for regular expressions because regexes make heavy use of backslahes. 
 
-4. Modify the `create` view so it looks like:
+4. Modify the `create` view:
 ```python
 def create():
     
@@ -819,11 +811,12 @@ def create():
 ```
 Try to create a form with a presentation title that is too short, or add numbers to the list of presenters. You will see the corresponding error messages and you will notice that the form remembers what the user has entered. Fix the problems and try to resubmit, the presentation will be aded.
 
+## The WTForms Way
 Input validation is such a common task in web development that many libraries have been developed to streamline it. Python's `WTForms` is the default choice for many Flask users, so Flask developers have created an even easier-to-use form validation library based on `WTForms` called `Flask-WTF`.
 
-1. Install `Flask-WTF` with `pip install Flask-WTF`
+1. Install `Flask-WTF` with `pip install Flask-WTF` or `conda install flask-wtf`
 
-2. Create a file called `forms.py` in the `app-tempaltes` directory with the following content:
+2. Create `forms.py`:
 ```python
 from flask_wtf import FlaskForm
 from wtforms import StringField, FileField, validators, widgets, Field, HiddenField
@@ -866,29 +859,36 @@ class PresentationForm(FlaskForm):
 >>> b.x
 54
 ```
-* `WTForms` provides several classes that correspond roughly to HTML form fields. The `StringField` for example, corresponds to an `<input type="text">` field by default. Each field class takes a title field which will get dispalyed on the form, and a list of validator objects to run against the field's value. `WTForms` provides common useful validator classes: `Length` ensures that the length of the input is within a minimum and/or maximum, `DataRequired` ensures that the user has entered a value, and `Regexp` verifies that the input matches a regular expression pattern. In this code, we are calling the constructors of these validators to create validator objects. Each constructor takes a `message` argument which gets displayed when there is an error in the validation. Notice how we supply a `TextArea` widget to the `notes` field because we want to show that field as a `<textarea>`.
-3. Change `presentations-list.py` as follows:
+* `WTForms` provides several classes that correspond roughly to HTML form fields. The `StringField` for example, corresponds to an `<input type="text">` field by default. Each field class takes a title field which will get dispalyed on the form, and a list of validator objects to run against the field's value. `WTForms` provides useful validator classes: `Length` ensures that the length of the input is within a minimum and/or maximum, `DataRequired` ensures that the user has entered a value, and `Regexp` verifies that the input matches a regular expression pattern. In this code, we are calling the constructors of these validators to create validator objects. Each constructor takes a `message` argument which gets displayed when there is an error in the validation. Notice how we supply a `TextArea` widget to the `notes` field because we want to show that field as a `<textarea>`.
+3. Change `rgsapp.py`:
 ```python
-import json
 from forms import PresentationForm
 ...
-@app.route('/create', methods=('GET','POST'))
+@app.route('/create', methods=('GET', 'POST'))
 def create():
-    
     form = PresentationForm()
     
     if form.validate_on_submit():
-        ...
-        for fname in ["title", "presenters", "scheduled", "time_range", "notes"]:
-            new_pres[fname] = getattr(form, fname).data
-        new_pres['scheduled'] = new_pres['scheduled'].strftime('%Y-%m-%d')
-        ...
+        
+        db = connect_db()
+        cursor = db.cursor()
+        cursor.execute("""insert into presentation(title, presenters, scheduled, time_range, notes)
+            values(?, ?, ?, ?, ?)""", 
+            [getattr(form, f).data for f in 
+            ('title', 'presenters', 'scheduled', 'time_range', 'notes')])
+        
+        db.commit()
+        db.close()
+        
+        flash('Presentation has been added')
+        return redirect(url_for('home'))
+    
     return render_template('create.html', form=form)
 ```
 * We import and instantiate the `PresentationForm`. The form class knows to automatically use the `request` object that Flask provides to get form data.
 * `validate_on_submit()` returns `True` if the request is `POST` and all fields are valid, and `False` otherwise.
-* The class attributes we defiend in `PresentationForm` contain submission data, but we access them dynamically with `form[fname]`. To access object attributes in Python dynamically, use the `getattr(obj, attrname)` function.
-* Each class attribute in `PresentationForm` has a `data` attribute which contains the submitted value. We can use the `request.form[fname]` as before but sometimes, the form class will do extra _sanitization_ on the submitted values so it is a good idea to use the value in the form, not the request.
+* The class attributes we defiend in `PresentationForm` contain submission data, but we cannot access them dynamically with `form[f]`. To access object attributes in Python dynamically, use the `getattr(obj, attrname)` function.
+* Each class attribute in `PresentationForm` has a `data` attribute which contains the submitted value. We can use the `request.form[f]` as before but sometimes, the form class will do extra _sanitization_ on the submitted values so it is a good idea to use the value in the form, not the request.
 * The `Date` field helpfully converts the scheduled filed into a Python `date` object. But the `json` module cannot serialize `date` objects so for now, we manually coerce the scheduled field into a string with `strftime()`. 
 * We deliver the `form` itself to the template context.
 
