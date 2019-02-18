@@ -1,13 +1,20 @@
-from flask import Flask, render_template, abort, request, redirect, url_for, flash
+from flask import Flask, render_template, abort, request, redirect, url_for, flash, \
+    send_from_directory
 import json
 import sqlite3
 import re
 from forms import PresentationForm
+import random
+import os
+from werkzeug.utils import secure_filename
+import string
+
 range_regex = re.compile(r"^(?P<fromhour>\d{1,2})\s*(:\s*(?P<fromminute>\d{1,2}))?\s*(?P<fromampm>am|pm)?\s*\-\s*(?P<tohour>\d{1,2})\s*(:\s*(?P<tominute>\d{1,2}))?\s*(?P<toampm>am|pm)?$", flags=re.IGNORECASE)
 
 app = Flask(__name__)
 app.config['db_path'] = 'db.sqlite'
 app.secret_key = b'xYFRlEs3@a'
+app.config['uploads_path'] = './uploads/'
 @app.route('/')
 def home():
     
@@ -30,6 +37,10 @@ def details(pid):
     if presentation is None:
         abort(404)
     
+    attachments = db.execute("""select * from attachment a where a.presentation_id = ?""", (pid,))
+    
+    presentation['attachments'] = list(attachments)
+    
     db.close()
     
     return render_template('details.html', p=presentation)
@@ -40,11 +51,27 @@ def create():
     
     if form.validate_on_submit():
         
+        # upload attachments
+        attachments = []
+        if 'attachments' in request.files:
+           for f in request.files.getlist('attachments'):
+               filename = generate_file_name(f.filename)
+               f.save(os.path.join(app.config['uploads_path'], filename))
+               attachments.append(filename)
+        
         db = connect_db()
-        db.execute("""insert into presentation(title, presenters, scheduled, time_range, notes)
+        cursor = db.cursor()
+        cursor.execute("""insert into presentation(title, presenters, scheduled, time_range, notes)
             values(?, ?, ?, ?, ?)""", 
             [getattr(form, f).data for f in 
             ('title', 'presenters', 'scheduled', 'time_range', 'notes')])
+        
+        # need to know the newly inserted presentation id
+        pid = cursor.lastrowid
+        
+        for a in attachments:
+            cursor.execute("""insert into attachment(presentation_id, filename)
+             values(?, ?)""", (pid, a))
         
         db.commit()
         db.close()
@@ -87,6 +114,16 @@ def delete(pid):
     flash('Presentation deleted.')
     return redirect(url_for('home'))
     
+@app.route('/getfile/<int:aid>', methods=('GET',))
+def getfile(aid):
+    db = connect_db()
+    attachment = db.execute("""select * from attachment a where a.id = ?""", (aid,)).fetchone()
+
+    if attachment is None:
+        abort(404)
+        
+    return send_from_directory(app.config['uploads_path'], attachment['filename'], as_attachment=True)
+    
 def connect_db():
     
     def dict_factory(cursor, row):
@@ -119,3 +156,12 @@ def validate_onsubmit():
     
     is_valid_submission = len(errors) == 0
     return is_valid_submission, errors
+    
+def generate_file_name(filename):
+    prefix = randstr(8)
+    filename = '%s-%s' % (prefix, secure_filename(filename))
+    return filename
+
+# from stackoverflow ...
+def randstr(N):
+    return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(N))

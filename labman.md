@@ -1084,19 +1084,35 @@ Users should be able to upload useful attachments to go with presentations: the 
 3. Store the file in a designated `upload` folder on the file system.
 4. Make a record in the database of the attachment
 
-In the edit form, we'll also need to allow users to remove attachment so things become a bit more complicated there. That's why we start by adding upload function to the create presentation form.
+## Updating the Database
 
-1. create a folder `uploads` under the `app-templates` folder.
-2. in `presentations-list.py`, add the following imports and config:
+We'll store records of presentation attachments in a separate table, `attachment`.
+
+1. Add the following to the end of `schema.sql`:
+```sql
+DROP TABLE IF EXISTS attachment;
+CREATE TABLE attachment (
+    id integer primary key autoincrement,
+    presentation_id integer not null,
+    filename text not null,
+    foreign key (presentation_id) references presentation(id)
+);
+```
+2. Run `python initdb.py` to reinitialize the database.
+
+## Modifying the Create View
+
+1. Create a folder `uploads` under  `rgs`.
+2. Add the following imports and config in `rgsapp.py`:
 ```python
 import random
 import os
 from werkzeug.utils import secure_filename
 import string
 ...
-app.config['upload_path'] = './uploads/'
+app.config['uploads_path'] = './uploads/'
 ```
-3. at the bottom of the same file, add this function:
+3. At the bottom, add:
 ```python
 def generate_file_name(filename):
     prefix = randstr(8)
@@ -1109,77 +1125,98 @@ def randstr(N):
 ```
 `generate_file_name` secures the given name and attaches a random prefix to it so that files with identical names don't overwrite each other. 
 
-4. modify the `create` view to include the attachment handling logic:
+4. Modify the `create` view to include the attachment handling logic:
 ```python
 if form.validate_on_submit():
         
         # upload attachments
         attachments = []
         if 'attachments' in request.files:
-           
            for f in request.files.getlist('attachments'):
                filename = generate_file_name(f.filename)
                f.save(os.path.join(app.config['uploads_path'], filename))
                attachments.append(filename)
 
-         ...
-        # create new presentation record
-        new_pres = {
-            "id" : next_id,
-            "attachments" : attachments
-        }
+        db = connect_db()
+        cursor = db.cursor()
+        cursor.execute("""insert into presentation(title, presenters, scheduled, time_range, notes)
+            values(?, ?, ?, ?, ?)""", 
+            [getattr(form, f).data for f in 
+            ('title', 'presenters', 'scheduled', 'time_range', 'notes')])
+        
+        # need to know the newly inserted presentation id
+        pid = cursor.lastrowid
+        
+        for a in attachments:
+            cursor.execute("""insert into attachment(presentation_id, filename)
+             values(?, ?)""", (pid, a))
 ```
-5. add an attachments field to `PresentationForm`:
+* `cursor` is the object that `sqlite3` uses to execute operations on the database. The previous `db.execute()` was just a short-hand which creates a cursor on the fly and executes the query on the cursor. In this case, we need the cursor to get the last insertion ID.
+
+4. Modify `details` so that it retrieves attachments associated with a presentation:
+```python
+@app.route('/presentation/<int:pid>')
+def details(pid):
+    
+    db = connect_db()
+    presentation = db.execute("""select * from presentation p where p.id = ?""", (pid,)).fetchone()
+
+    if presentation is None:
+        abort(404)
+    
+    attachments = db.execute("""select * from attachment a where a.presentation_id = ?""", (pid,))
+    
+    presentation['attachments'] = list(attachments)
+    
+    db.close()
+    
+    return render_template('details.html', p=presentation)
+```
+
+5. Add a route which let's people download attachments:
+```python
+from flask import Flask, render_template, abort, request, redirect, url_for, \
+    flash, send_from_directory
+...
+@app.route('/getfile/<int:aid>', methods=('GET',))
+def getfile(aid):
+    db = connect_db()
+    attachment = db.execute("""select * from attachment a where a.id = ?""", (aid,)).fetchone()
+
+    if attachment is None:
+        abort(404)
+        
+    return send_from_directory(app.config['uploads_path'], attachment['filename'], as_attachment=True)
+```
+* The last `send_from_directory` function provides a secure way to deliver an attachment to the browser. It splits the file path into a directory and a filename so that malicious users cannot specify paths like `./uploads/../secret_file`. Of course, in our case this is not much of a problem because we vet the attachment file names before they get inserted into the database.
+
+6. Add an attachments field to `PresentationForm`:
 ```python
 attachments = FileField('Attachments')
 ```
-Here the PresentationForm can be used to validate the name of the file, but we don't really care about that. We define a field so that the form can render it in the template.
+* Here the PresentationForm can be used to validate the name of the file, but we don't really care about that. We define a field so that the form can render it in the template.
 
-6. update the form template in `_presentation_form.html`:
+7. Update the form template in `_presentation_form.html`:
 ```html
 {{ render_field(form.attachments) }}
 ```
-7. change the `form` tag so that it supports file uploads in `create.html`:
+8. Change the `form` tag so that it supports file uploads in `create.html`:
 ```html
 <form method="post" enctype="multipart/form-data">
 ```
-8. update `details.html` so that it lists the uploaded attachments:
+9. Update `details.html` so that it lists the uploaded attachments:
 ```html
 {% if p['attachments'] %}  
 <h2>Attachments</h2>
 <ul>
     {% for a in p['attachments'] %}
-    <li><a href="{{ url_for('getfile', pid=p['id'], aid=loop.index-1) }}">{{ a }}</a></li>
+    <li><a href="{{ url_for('getfile', aid=a['id']) }}">{{ a['filename'] }}</a></li>
     {% endfor %}
 </ul>
 {% endif %}
 ```
-`loop.index` is a special Jinja variable that indicates the current index in the loop, starting from 1.
 
-9. add a route to get the attachment:
-```python
-from flask import Flask, render_template, abort, request, redirect, url_for, \
-    flash, send_from_directory
-...
-@app.route('/getfile/<int:pid>/<int:aid>', methods=('GET',))
-def getfile(pid, aid):
-    
-    with open(app.config['presentations_path'], 'r') as f:
-        presentations = json.load(f) 
 
-    presentation = next((p for p in presentations if p['id'] == pid), None)
-
-    if presentation is None:
-        abort(404)
-    
-    if aid < 0 or aid >= len(presentation['attachments']):
-        abort(404)
-    
-    attachment = presentation['attachments'][aid]
-    
-    return send_from_directory(app.config['uploads_path'], attachment, as_attachment=True)
-```
-The last `send_from_directory` function provides a secure way to deliver an attachment to the browser. It splits the file path into a directory and a filename so that malicious users cannot specify paths like `./uploads/../secret_file`. Of course, in our case this is not much of a problem because we vet the attachment file names before they get inserted into the database.
 
 10. You can now try uploading files with a new presentation and they will show up when you view the details page. 
 
