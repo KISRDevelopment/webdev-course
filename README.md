@@ -22,6 +22,79 @@ The requirements are simple, but they are enough to cover everything we need to 
 * File uploads
 * Deployment
 
+# Web Application Architecture
+
+A web application consists of a _client-side_ and a _server-side_. The client-side typically executes on the web browser and consists of HTML/CSS/Javascript, while the server-side executes on a server and can be written in any language. A mobile app is another example of a client and it can also be written in any language. During this course we focus on web browser clients.
+
+The flow of a web application is as follows:
+
+1. The user enters a URL into their web browser.
+2. If the URL is a domain name, the browser asks the Domain-Name-System (DNS) server for the IP address that corresonds to the domain name.
+3. Given the IP address, the browser makes an HTTP request. Server applications always listen on a _port_ which is a number that helps the server OS decide which connections should be handled by which piece of software. If the user does not specify a port in the URL, the browser assumes it is port 80.
+4. The server recieves the request, processes it, and returns a response. Typically the response is an HTML page.
+5. The browser displays the server's response. 
+6. The user makes further interactions with the server through elements on the HTML page (e.g., forms, links, etc.)
+
+Most of the action in this course occurs in step 4 of the process: recieving a request and generating a response.
+
+Many tasks in server-side development are repetitive: read input data, validate forms, communicate with a database, render the output, etc. To keep developers focused on the application’s main features, many frameworks have been created to automate common tasks, e.g., ASP dot NET MVC, Ruby on Rails, Django, etc. While it is easy to get started with many of these frameworks, developers will often have a hard time diagnosing issues because so much detail is hidden away in the framework’s source code. In this course, we will instead introduce programmers to a simple Python web framework called Flask which provides solid support for the developer without introducing layers of abstraction that get in the way. 
+
+An important factor to remember is that the HTTP protcol is **stateless**: each HTTP request is treated in isolation, without regard to the history of requests that came before it. In other words, the web server does not keep a list of actively connected clients nor does the client keep a list of actively connected servers.  This simplifies protocol design at the cost of having the application developer (you) keep extra information to track a user between requests. For example, you may have heared of _cookies_ 🍪 which are little nuggets of data that the browser sends with every request to the server. The server can store data in these cookies, e.g., shopping cart contents, so that it can track users between requests.
+
+# Installation
+
+## Mac
+
+(instructions lifted from https://wsvincent.com/install-python3-mac/)
+
+```sh
+$ xcode-select --install
+$ /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
+$ brew doctor
+Your system is ready to brew
+$ brew install python3
+$ python3 --version
+Python 3.7.0
+```
+
+Create a course directory and setup the virtual environment for this course:
+```sh
+$ mkdir ~/webdev-course
+$ cd ~/webdev-course
+$ python3 -m venv venv
+$ . venv/bin/activate
+$ pip install wheel
+$ pip install Flask
+```
+
+Whenever you open a new terminal window, you will have to activate the virtual environment:
+```sh
+$ cd ~/webdev-course
+$ . venv/bin/activate
+...
+$ deactivate # to deactivate
+```
+
+## Windows
+
+1. Install [Anaconda Python 3.7 Windows x64](https://www.anaconda.com/distribution/#download-section)
+2. After installation, open a terminal and run:
+```cmd
+C:\Users\Mohammad> conda create -n myenv
+C:\Users\Mohammad> activate myenv
+(myenv) C:\Users\Mohammad> conda install flask
+```
+3. Create a directory for the course:
+```cmd
+C:\Users\Mohammad> mkdir webdev-course
+C:\Users\Mohammad> cd webdev-course
+```
+
+When you open a new terminal window, you will have to activate the virtual environment:
+```cmd
+C:\Users\Mohammad> activate myenv
+```
+
 # Basic Flask App
 
 Flask applications can be written in a single Python file. Let's work through a simple app:
