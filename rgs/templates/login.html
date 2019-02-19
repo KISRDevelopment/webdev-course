@@ -1,3 +1,5 @@
+{% from "_macros.html" import render_field %}
+
 {% extends 'base.html' %}
 
 {% block title %}{% endblock %}
@@ -7,18 +9,13 @@
 <div class='card'>
 	<h1>Login</h1>
 	<form method="post">
-
-
-	<dl>
-		<dt>Username:</dt>
-		<dd><input type="text" name="username" value=""></dd>
-		<dt>Password:</dt>
-		<dd><input type="password" name="password" value=""></dd>
-	</dl>
-
+     {{ form.csrf_token }}
+        <dl>
+            {{ render_field(form.username) }}
+            {{ render_field(form.password) }}
+        </dl>
 	<p><input type="submit" value="Login"/></p>
 
 	</form>
-
 </div>
 {% endblock %}

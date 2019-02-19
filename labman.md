@@ -1349,9 +1349,9 @@ Edit some presentations by uploading new attachments or removing existing ones.
 
 # Authentication and Authorization
 
-We don't want just anyone to change the presentations schedule, and we may also want to restrict access to the schedule to certain users. To do this, we need to implement _authentication_ and _authorization_ mechanisms. Authenticating a user ensures that the user is who they claim to be (e.g., via username and password), while authorization ensures that a user has the right to do an action (e.g, is an admin). 
+We don't want just anyone to change the presentations schedule, and we may also want to restrict access to the schedule to certain users. To do this, we need to implement _authentication_ and _authorization_ mechanisms. Authenticating a user ensures that the user is who they claim to be (e.g., user mmkhajah is really Mohammad), while authorization ensures that a user has the right to do an action (e.g, can add presentation, can view presentations, etc). Authentication is typically performed with the combination of username and password, fingerprinting, etc. Authorization can be implemented with simple _roles_: a user can have an admin role, a normal role, etc.
 
-We'll need to keep track of users in our database, so add the following to the end of `schema.sql` and rerun `python initdb.py` to reinitialize the database:
+To implement authentication and authorization, we'll need to keep track of users in our database, so add the following to the end of `schema.sql` and rerun `python initdb.py` to reinitialize the database:
 ```sql
 DROP TABLE IF EXISTS user;
 CREATE TABLE user (
@@ -1360,43 +1360,92 @@ CREATE TABLE user (
     password_hash text not null,
     user_role text not null
 );
+CREATE UNIQUE INDEX username_index ON user(username);
 INSERT INTO user VALUES(null, 'mmkhajah', '$pbkdf2-sha256$29000$6H0vRYiRUipljBECoFQqxQ$3jePNmElDj.xZl2aw8ktbLQ/UMQbGRmn5cG3geNkJSE', 'admin');
 INSERT INTO user VALUES(null, 'user1', '$pbkdf2-sha256$29000$prSW8j4nhHDundOac04JoQ$9cbvKgz/KBvRTFpGIakfcu2mc.kRO6XSKyTlUzUZAdQ', 'user');
 ```
-* Each user has username, role, and a hashed password. **Never** store the password in your database, instead use a hashing library to store a hashed version of the password. Good hashing algorithms generate (almost) unique strings for a given input text. The operation is destructive: it is usually not possible to recover the input text, given a hashed version. Because of this, storing the hashed passwords ensures that even if the database is compromised, attackers cannot recover the original passwords.
-* The insert statements for users `mmkhajah` and `user1` use the SHA256 hashed versions of the passwords `hello world` and `hello world 2`, respectively.
+* Each user has username, role, and a hashed password. 
+* **Never** store the password in your database; instead, use a hashing library to store a hashed version of the password. Good hashing algorithms generate (almost) unique strings for a given input. But the operation is destructive: it is usually not possible to recover the input text, given its' hash. Because of this, storing the hashed passwords ensures that even if the database is compromised, attackers cannot recover the original passwords.
+* The insert statements for users `mmkhajah` and `user1` use the SHA256 hashed versions of the passwords `hello world` and `hello world 2`, respectively. So don't worry: these long strings are not the actual passwords!
 
-We'll also need the `Flask-Login` which takes care of the details of managing user sessions over multiple requests, and the `passlib` library which hashes passwords securely:
+We'll need `Flask-Login` extension which takes care of the details of managing user sessions over multiple requests, and the `passlib` library which hashes passwords securely:
 ```sh
 $ pip install flask-login passlib
 ```
+On windows:
+```cmd
+> conda install flask-login passlib
+```
 
-Let's beging by adding a login page to our app:
+We are going to create a login form. But first, let's refactor the `render_field` macro so that it is available to any template which needs to render forms, not just `_presentation_form.html`. 
+
+1. Create a file `_macros.html`:
+```html
+{% macro render_field(field) %}
+  <dt>{{ field.label }}
+  <dd>{{ field(**kwargs)|safe }}
+  {% if field.errors %}
+    <ul class=errors>
+    {% for error in field.errors %}
+      <li>{{ error }}</li>
+    {% endfor %}
+    </ul>
+  {% endif %}
+  </dd>
+{% endmacro %}
+```
+2. Modify `_presentation_form.html` so that it includes the macro, instead of defining it:
+```html
+{% from "_macros.html" import render_field %}
+<dl>
+    {{ render_field(form.title) }}
+    {{ render_field(form.presenters) }}
+    {{ render_field(form.scheduled) }}
+    {{ render_field(form.time_range) }}
+    {{ render_field(form.notes) }}
+    {{ render_field(form.attachments) }}
+</dl>
+```
+* The template now imports the `render_field` macro using what looks like Python syntax, but remember that Jinja is NOT python. After all, you cannot import `html` files in Python!
+* It is common to have a template full of macros and import what you need from it using the `import` Jinja statement.
+3. Verify that the add/edit forms still work.
+
+Let's start by adding a login page to our app:
 
 1. Create `login.html`:
 ```html
+{% from "_macros.html" import render_field %}
+
 {% extends 'base.html' %}
 
 {% block title %}{% endblock %}
 
 {% block content %}
-
 <div class='card'>
 	<h1>Login</h1>
-	<form action="post">
-	<dl>
-		<dt>Username:</dt>
-		<dd><input type="text" name="username" value=""></dd>
-		<dt>Password:</dt>
-		<dd><input type="password" name="password" value=""></dd>
-	</dl>
+	<form method="post">
+     {{ form.csrf_token }}
+        <dl>
+            {{ render_field(form.username) }}
+            {{ render_field(form.password) }}
+        </dl>
 	<p><input type="submit" value="Login"/></p>
 	</form>
 </div>
 {% endblock %}
 ```
-2. Create the `login` view:
+
+2. Create a `LoginForm` class in `forms.py`:
 ```python
+class LoginForm(FlaskForm):
+    username = StringField('Username', validators=[vals.DataRequired()])
+    password = PasswordField('Password', validators=[vals.DataRequired()])
+```
+
+3. Create the `login` view:
+```python
+from forms import PresentationForm, LoginForm
+...
 @app.route('/login', methods=('GET', 'POST'))
 def login():
 

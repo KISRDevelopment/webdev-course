@@ -3,7 +3,7 @@ from flask import Flask, render_template, abort, request, redirect, url_for, fla
 import json
 import sqlite3
 import re
-from forms import PresentationForm
+from forms import PresentationForm, LoginForm
 import random
 import os
 from werkzeug.utils import secure_filename
@@ -206,11 +206,12 @@ def delete_attachment(aid):
 def login():
 
     db = connect_db()
+    form = LoginForm()
+    
+    if form.validate_on_submit():
 
-    if request.method == 'POST':
-
-        username = request.form['username']
-        password = request.form['password']
+        username = form.username.data
+        password = form.password.data
 
         user_row = db.execute("select * from user u where u.username = ?", (username,)).fetchone()
         
@@ -221,7 +222,7 @@ def login():
             flask_login.login_user(user)
             return redirect(url_for('home'))
         
-    return render_template('login.html')
+    return render_template('login.html', form=form)
     
 @app.route('/logout')
 def logout():

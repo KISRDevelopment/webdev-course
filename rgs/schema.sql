@@ -26,5 +26,6 @@ CREATE TABLE user (
     password_hash text not null,
     user_role text not null
 );
+CREATE UNIQUE INDEX username_index ON user(username);
 INSERT INTO user VALUES(null, 'mmkhajah', '$pbkdf2-sha256$29000$6H0vRYiRUipljBECoFQqxQ$3jePNmElDj.xZl2aw8ktbLQ/UMQbGRmn5cG3geNkJSE', 'admin');
 INSERT INTO user VALUES(null, 'user1', '$pbkdf2-sha256$29000$prSW8j4nhHDundOac04JoQ$9cbvKgz/KBvRTFpGIakfcu2mc.kRO6XSKyTlUzUZAdQ', 'user');

@@ -1,5 +1,5 @@
 from flask_wtf import FlaskForm
-from wtforms import StringField, FileField, validators, widgets, Field, HiddenField
+from wtforms import StringField, FileField, validators, widgets, PasswordField
 from wtforms.fields.html5 import DateField
 import re
 
@@ -19,4 +19,8 @@ class PresentationForm(FlaskForm):
     time_range = StringField('Time', validators=[vals.DataRequired(), range_validator])
     notes = StringField('Notes', widget=widgets.TextArea())
     attachments = FileField('Attachments')
+    
+class LoginForm(FlaskForm):
+    username = StringField('Username', validators=[vals.DataRequired()])
+    password = PasswordField('Password', validators=[vals.DataRequired()])
     
