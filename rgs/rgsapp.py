@@ -10,6 +10,7 @@ from werkzeug.utils import secure_filename
 import string
 import flask_login
 from passlib.hash import pbkdf2_sha256
+import functools
 
 range_regex = re.compile(r"^(?P<fromhour>\d{1,2})\s*(:\s*(?P<fromminute>\d{1,2}))?\s*(?P<fromampm>am|pm)?\s*\-\s*(?P<tohour>\d{1,2})\s*(:\s*(?P<tominute>\d{1,2}))?\s*(?P<toampm>am|pm)?$", flags=re.IGNORECASE)
 
@@ -21,6 +22,25 @@ app.config['uploads_path'] = './uploads/'
 login_manager = flask_login.LoginManager()
 login_manager.login_view = "login"
 login_manager.init_app(app)
+
+
+def requires_role(role):
+    def decorator(func):
+        @functools.wraps(func)
+        def f(*args, **kwargs):
+            
+            if not flask_login.current_user:
+                abort(401)
+            
+            u = flask_login.current_user
+
+            if  u.role != 'admin' and u.role != role:
+                abort(401)
+            
+            return func(*args, **kwargs)
+        return f
+    return decorator
+
 
 @app.route('/')
 @flask_login.login_required
@@ -35,6 +55,7 @@ def home():
     return output
     
 @app.route('/presentation/<int:pid>')
+@flask_login.login_required
 def details(pid):
     
     db = connect_db()
@@ -50,6 +71,8 @@ def details(pid):
     return render_template('details.html', p=presentation)
     
 @app.route('/create', methods=('GET', 'POST'))
+@flask_login.login_required
+@requires_role('admin')
 def create():
     form = PresentationForm()
     
@@ -85,6 +108,8 @@ def create():
     return render_template('create.html', form=form)
    
 @app.route('/edit/<int:pid>', methods=('GET', 'POST'))
+@flask_login.login_required
+@requires_role('admin')
 def edit(pid):
     db = connect_db()
     presentation = db.execute("""select * from presentation p where p.id = ?""", (pid,)).fetchone()
@@ -123,6 +148,8 @@ def edit(pid):
     return render_template('edit.html', form=form, pid=pid, attachments=attachments)
     
 @app.route('/delete/<int:pid>', methods=('POST',))
+@flask_login.login_required
+@requires_role('admin')
 def delete(pid):
     db = connect_db()
 
@@ -143,6 +170,7 @@ def delete(pid):
     return redirect(url_for('home'))
     
 @app.route('/getfile/<int:aid>', methods=('GET',))
+@flask_login.login_required
 def getfile(aid):
     db = connect_db()
     attachment = db.execute("""select * from attachment a where a.id = ?""", (aid,)).fetchone()
@@ -154,6 +182,8 @@ def getfile(aid):
     return send_from_directory(app.config['uploads_path'], attachment['filename'], as_attachment=True)
     
 @app.route('/delete_attachment/<int:aid>', methods=('POST',))
+@flask_login.login_required
+@requires_role('admin')
 def delete_attachment(aid):
     db = connect_db()
     attachment = db.execute("""select * from attachment a where a.id = ?""", (aid,)).fetchone()
@@ -239,12 +269,13 @@ class User(flask_login.UserMixin):
 def user_loader(username):
     db = connect_db()
 
-    user_row = db.execute("select * from user u where u.username = ?", (username,))
-
+    user_row = db.execute("select * from user u where u.username = ?", (username,)).fetchone()
     if user_row is None:
         return
     
     user = User()
     user.id = username
+    user.role = user_row['user_role']
+
     return user
 
