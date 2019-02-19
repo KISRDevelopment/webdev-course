@@ -47,3 +47,11 @@ th {
     color: #333366;
     font-weight: bold;
 }
+
+.card {
+    margin: auto;
+    border: 1px solid DodgerBlue;
+    width: 350px;
+    border-radius: 25px;
+    padding: 20px;
+}

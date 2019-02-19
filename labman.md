@@ -134,7 +134,7 @@ def another_page():
     return 'Another page!'
 ```
 
-Navigate to `http://localhost:500/another_page`. You should see "Another page!" in the browser's window.
+Navigate to `http://localhost:5000/another_page`. You should see "Another page!" in the browser's window.
 
 > Exercise: change `another_page():` to `another_page()5463456` and reload the url. See what happens.
 
@@ -178,6 +178,11 @@ Re-running this code will produce a greeting wrapped in `<strong>` tags. This is
 Python provides syntactic sugar to make it easier to specify decorators on functions. The previous example would be:
 
 ```python
+def strong(func):
+    def wrapper(name):
+        return "<strong>" + func(name) + "</strong>"
+    return wrapper
+
 @strong
 def greet(name):
     return "Hello %s" % name
@@ -212,7 +217,7 @@ print(greet("Noura"))
 
 Back to our context: the `app.route(url)` decorator essentially associates the decorated function with the specified url on the app object. In such a scenario, the purpose of the decorator is not to wrap the function, but to use it in some way.
 
-You can find more about decorators in this  article: https://www.thecodeship.com/patterns/guide-to-python-function-decorators/
+You can find more about decorators in this [article](https://www.thecodeship.com/patterns/guide-to-python-function-decorators/).
 
 # Generating the List of Presentations
 
@@ -308,7 +313,7 @@ def connect_db():
 
 2. In the terminal:
 ```sh
-$ export FLASK_APP=presentations-list.py
+$ export FLASK_APP=rgsapp.py
 $ flask run
 ```
 and navigate to `127.0.0.1:5000` in your browser. You should see a bulleted list of presentation titles.
@@ -1341,3 +1346,59 @@ def delete(pid):
 Since `delete_attachment` is an operation which changes the database, we've marked as a `POST` operation. To send requests via `POST`, we have to use an HTML form. So we create one form for which attachment.
 
 Edit some presentations by uploading new attachments or removing existing ones.
+
+# Authentication and Authorization
+
+We don't want just anyone to change the presentations schedule, and we may also want to restrict access to the schedule to certain users. To do this, we need to implement _authentication_ and _authorization_ mechanisms. Authenticating a user ensures that the user is who they claim to be (e.g., via username and password), while authorization ensures that a user has the right to do an action (e.g, is an admin). 
+
+We'll need to keep track of users in our database, so add the following to the end of `schema.sql` and rerun `python initdb.py` to reinitialize the database:
+```sql
+DROP TABLE IF EXISTS user;
+CREATE TABLE user (
+    id integer primary key autoincrement,
+    username text not null,
+    password_hash text not null,
+    user_role text not null
+);
+INSERT INTO user VALUES(null, 'mmkhajah', '$pbkdf2-sha256$29000$6H0vRYiRUipljBECoFQqxQ$3jePNmElDj.xZl2aw8ktbLQ/UMQbGRmn5cG3geNkJSE', 'admin');
+INSERT INTO user VALUES(null, 'user1', '$pbkdf2-sha256$29000$prSW8j4nhHDundOac04JoQ$9cbvKgz/KBvRTFpGIakfcu2mc.kRO6XSKyTlUzUZAdQ', 'user');
+```
+* Each user has username, role, and a hashed password. **Never** store the password in your database, instead use a hashing library to store a hashed version of the password. Good hashing algorithms generate (almost) unique strings for a given input text. The operation is destructive: it is usually not possible to recover the input text, given a hashed version. Because of this, storing the hashed passwords ensures that even if the database is compromised, attackers cannot recover the original passwords.
+* The insert statements for users `mmkhajah` and `user1` use the SHA256 hashed versions of the passwords `hello world` and `hello world 2`, respectively.
+
+We'll also need the `Flask-Login` which takes care of the details of managing user sessions via cookies, and the `passlib` library which hashes passwords securily:
+```sh
+$ pip install flask-login passlib
+```
+
+Let's beging by adding a login page to our app:
+
+1. Create `login.html`:
+```html
+{% extends 'base.html' %}
+
+{% block title %}{% endblock %}
+
+{% block content %}
+
+<div class='card'>
+	<h1>Login</h1>
+	<form action="post">
+	<dl>
+		<dt>Username:</dt>
+		<dd><input type="text" name="username" value=""></dd>
+		<dt>Password:</dt>
+		<dd><input type="password" name="password" value=""></dd>
+	</dl>
+	<p><input type="submit" value="Login"/></p>
+	</form>
+</div>
+{% endblock %}
+```
+2. Create the `login` view:
+```python
+@app.route('/login', methods=('GET', 'POST'))
+def login():
+
+    return render_template('login.html')
+```

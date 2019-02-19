@@ -1,5 +1,5 @@
 from flask import Flask, render_template, abort, request, redirect, url_for, flash, \
-    send_from_directory
+    send_from_directory, g
 import json
 import sqlite3
 import re
@@ -8,6 +8,8 @@ import random
 import os
 from werkzeug.utils import secure_filename
 import string
+import flask_login
+from passlib.hash import pbkdf2_sha256
 
 range_regex = re.compile(r"^(?P<fromhour>\d{1,2})\s*(:\s*(?P<fromminute>\d{1,2}))?\s*(?P<fromampm>am|pm)?\s*\-\s*(?P<tohour>\d{1,2})\s*(:\s*(?P<tominute>\d{1,2}))?\s*(?P<toampm>am|pm)?$", flags=re.IGNORECASE)
 
@@ -15,7 +17,13 @@ app = Flask(__name__)
 app.config['db_path'] = 'db.sqlite'
 app.secret_key = b'xYFRlEs3@a'
 app.config['uploads_path'] = './uploads/'
+
+login_manager = flask_login.LoginManager()
+login_manager.login_view = "login"
+login_manager.init_app(app)
+
 @app.route('/')
+@flask_login.login_required
 def home():
     
     db = connect_db()
@@ -23,9 +31,7 @@ def home():
     presentations = db.execute("select * from presentation")
     
     output = render_template('home.html', presentations=presentations)
-    
-    db.close()
-    
+
     return output
     
 @app.route('/presentation/<int:pid>')
@@ -40,8 +46,6 @@ def details(pid):
     attachments = db.execute("""select * from attachment a where a.presentation_id = ?""", (pid,))
     
     presentation['attachments'] = list(attachments)
-    
-    db.close()
     
     return render_template('details.html', p=presentation)
     
@@ -74,7 +78,6 @@ def create():
              values(?, ?)""", (pid, a))
         
         db.commit()
-        db.close()
         
         flash('Presentation has been added')
         return redirect(url_for('home'))
@@ -112,7 +115,6 @@ def edit(pid):
              values(?, ?)""", (pid, a))
         
         db.commit()
-        db.close()
         
         flash('Presentation has been edited')
         return redirect(url_for('home'))
@@ -136,7 +138,7 @@ def delete(pid):
     
     
     db.commit()
-    db.close()
+    
     flash('Presentation deleted.')
     return redirect(url_for('home'))
     
@@ -166,11 +168,36 @@ def delete_attachment(aid):
     
     db.execute("""delete from attachment where id=?""", (aid,))
     db.commit()
-    db.close()
     
     flash('Attachment %s has been removed' % attachment['filename'])    
     return redirect(url_for('edit', pid=attachment['presentation_id']))
     
+@app.route('/login', methods=('GET', 'POST'))
+def login():
+
+    db = connect_db()
+
+    if request.method == 'POST':
+
+        username = request.form['username']
+        password = request.form['password']
+
+        user_row = db.execute("select * from user u where u.username = ?", (username,)).fetchone()
+        
+        if user_row is not None and pbkdf2_sha256.verify(password, user_row['password_hash']):
+            user = User()
+            
+            user.id = username
+            flask_login.login_user(user)
+            return redirect(url_for('home'))
+        
+    return render_template('login.html')
+    
+@app.route('/logout')
+def logout():
+    flask_login.logout_user()
+    return redirect(url_for('home'))
+
 def connect_db():
     
     def dict_factory(cursor, row):
@@ -179,31 +206,23 @@ def connect_db():
             d[col[0]] = row[idx]
         return d
     
-    db = sqlite3.connect(app.config['db_path'],
+    if 'db' not in g:
+        g.db = db = sqlite3.connect(app.config['db_path'],
                          detect_types=sqlite3.PARSE_DECLTYPES)
-    db.row_factory = dict_factory
-    return db
+        db.row_factory = dict_factory
+    
+    return g.db
 
-def validate_onsubmit():
-    if request.method == 'GET':
-        return False, []
+@app.teardown_appcontext
+def close_db(error):
+    # removes an attribute by name
+    db = g.pop('db', None)
+
+    if db is None:
+        return 
     
-    f = request.form
-    
-    errors = []
-    
-    if len(f['title']) < 4:
-        errors.append('Title has to be at least 4 characters long')
-    if len(f['presenters']) < 4 or re.search(r'\d', f['presenters']):
-        errors.append('Presenters has to be at least 4 alphabetical characters long')
-    if not re.match(r'\d{4}\-\d{2}\-\d{2}', f['scheduled']):
-        errors.append('Date needs to be YYYY-MM-DD')
-    if not range_regex.match(f['time_range']):
-        errors.append('Time range should be like 9-10am, 9:30-11:40, etc.')
-    
-    is_valid_submission = len(errors) == 0
-    return is_valid_submission, errors
-    
+    db.close()
+
 def generate_file_name(filename):
     prefix = randstr(8)
     filename = '%s-%s' % (prefix, secure_filename(filename))
@@ -212,3 +231,20 @@ def generate_file_name(filename):
 # from stackoverflow ...
 def randstr(N):
     return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(N))
+
+class User(flask_login.UserMixin):
+    pass
+
+@login_manager.user_loader
+def user_loader(username):
+    db = connect_db()
+
+    user_row = db.execute("select * from user u where u.username = ?", (username,))
+
+    if user_row is None:
+        return
+    
+    user = User()
+    user.id = username
+    return user
+
