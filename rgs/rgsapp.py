@@ -23,20 +23,44 @@ login_manager = flask_login.LoginManager()
 login_manager.login_view = "login"
 login_manager.init_app(app)
 
+render_template_old = render_template
+def new_render_template(*args, **kwargs):
+    kwargs['user'] = flask_login.current_user
+    return render_template_old(*args,**kwargs)
+render_template = new_render_template
+
+class User(flask_login.UserMixin):
+    pass
+
+@login_manager.user_loader
+def user_loader(username):
+    db = connect_db()
+
+    user_row = db.execute("select * from user u where u.username = ?", (username,)).fetchone()
+    if user_row is None:
+        return
+    
+    user = User()
+    user.id = username
+    user.role = user_row['user_role']
+
+    return user
+
 
 def requires_role(role):
     def decorator(func):
         @functools.wraps(func)
         def f(*args, **kwargs):
-            
-            if not flask_login.current_user:
+            if not flask_login.current_user.is_authenticated:
                 abort(401)
             
             u = flask_login.current_user
-
+            
+            # if you are an admin, you have access to anything
+            # otherwise, make sure your role is the same as the
+            # required role
             if  u.role != 'admin' and u.role != role:
                 abort(401)
-            
             return func(*args, **kwargs)
         return f
     return decorator
@@ -221,13 +245,14 @@ def login():
             user.id = username
             flask_login.login_user(user)
             return redirect(url_for('home'))
-        
+        flash('Incorrect Credentials')
+    
     return render_template('login.html', form=form)
     
 @app.route('/logout')
 def logout():
     flask_login.logout_user()
-    return redirect(url_for('home'))
+    return redirect(url_for('login'))
 
 def connect_db():
     
@@ -249,10 +274,8 @@ def close_db(error):
     # removes an attribute by name
     db = g.pop('db', None)
 
-    if db is None:
-        return 
-    
-    db.close()
+    if db:
+        db.close()
 
 def generate_file_name(filename):
     prefix = randstr(8)
@@ -263,20 +286,7 @@ def generate_file_name(filename):
 def randstr(N):
     return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(N))
 
-class User(flask_login.UserMixin):
-    pass
 
-@login_manager.user_loader
-def user_loader(username):
-    db = connect_db()
 
-    user_row = db.execute("select * from user u where u.username = ?", (username,)).fetchone()
-    if user_row is None:
-        return
-    
-    user = User()
-    user.id = username
-    user.role = user_row['user_role']
 
-    return user
 

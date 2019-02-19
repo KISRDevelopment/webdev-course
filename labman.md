@@ -1448,6 +1448,277 @@ from forms import PresentationForm, LoginForm
 ...
 @app.route('/login', methods=('GET', 'POST'))
 def login():
-
-    return render_template('login.html')
+    form = LoginForm()
+    return render_template('login.html', form=form)
 ```
+4. Verify that the new login page works by navigating to `localhost:5000/login`. Of course, the view doesn't do anything so if you submit you'll get the same form back.
+
+Let's recap the login logic before implementing it:
+1. If the request is a `POST` and both `username` and `password` fields have been filled, retrieve the database record that corresponds to `username`.
+2. If no such record exists, reject login attempt. 
+3. Verify that the _hash_ of the entered password matches the one in the user's record.
+4. If the two match: log the user in by storing the `username` in a cryptographyically secure cookie.
+5. Otherwise, reject login attempt.
+
+For step 3, we will use the `passlib` library and for step 4, we'll use the `Flask-Login` library. 
+
+## `passlib` Usage
+let's  see how you can use `passlib` to securely store passwords:
+```python
+>>> from passlib.hash import pbkdf2_sha256
+>>> mypassword = 'hello world'
+>>> password_hash = pbkdf2_sha256.hash(mypassword)
+>>> password_hash
+'$pbkdf2-sha256$29000$rxXCGOM8p3SOkVKqda51Tg$VOnUI044pEF4QWnQsUj.P/Y8ugQ/HW/9o8KcDTMOIus'
+>>> pbkdf2_sha256.verify('hello world', password_hash)
+True
+>>> pbkdf2_sha256.verify('incorrect password', password_hash) 
+False
+>>> password_hash2 = pbkdf2_sha256.hash(mypassword)
+>>> password_hash2
+'$pbkdf2-sha256$29000$GiMkBGCMca7V.v8fQ4iREg$o4yabjaFONs0OjPiUrF54j/oGnb6UtCO4CgL5g.g9yc'
+>>> password_hash2 == password_hash
+False
+```
+* `pbkdf2_sha256` is a class that implements a SHA256 hashing algorithm.
+* `pbkdf2_sha256.hash` and `pbkdf2_sha256.verify` are both static functions on the class
+* `hash` takes a plain string and hashes it
+* `verify` verifies that the _hash_ of a plain string (first argument) is equal to a reference hash (second argument)
+* `hash` will return different outputs, even for the same input, because it generates a different random _salt_ every time. So do **NOT** compare password hashes using Python's string equality directly. Use `verify` instead.
+
+## `Flask-Login` Usage
+
+Flask-Login makes it easy to:
+
+* Log users in and out
+* Restrict access to views to logged in users
+* Manage user sessions
+
+The library does not care how user information is stored. In fact, if you read the library's quick start example, they load user data from a plain Python dictionary. This flexibility is desirable because the library does not impose a specific database structure on the developer.
+
+The way the library works is as follows:
+
+* When the user is logged in, the library stores the user's ID (usually username or email) in a signed cookie (another reason why you need to have a secret key). As stated earlier, cookies are available on the client-side, so what if an attacker simply changes the user ID in the cookie to something else? the answer is because the cookie is signed using a secret key that only the server knows, any attempt to tamper with the cookie's contents will be rejected.
+* When a new request arrives, the library examines the cookie and extracts the user ID. Given this ID, the library calls a function that ***you*** define to get the user's full profile (e.g., profile photo url, website, interests, role, etc.).
+* By default, cookies expire when the user closes the browser. Although this can be changed by enabling a "Remember Me" feature in Flask-Login.
+
+At a minimum, the library requires that you define a _user loader_: a function that takes a user ID and returns a user object. This function will be called whenever a new request arrives. 
+
+Besides defining the _user loader_, the library requires that you instantiate a `LoginManager`. This class is responsible for configuring certain aspects of the login system: which login view to redirect to if an unauthenticated user attempts to open a restricted view, the login message to show, etc. 
+
+For our application, modify `rgsapp.py`:
+```python
+import flask_login
+...
+app.config['uploads_path'] = './uploads/'
+
+login_manager = flask_login.LoginManager()
+login_manager.login_view = "login"
+login_manager.init_app(app)
+
+class User(flask_login.UserMixin):
+    pass
+
+@login_manager.user_loader
+def user_loader(username):
+    db = connect_db()
+
+    user_row = db.execute("select * from user u where u.username = ?", (username,)).fetchone()
+    if user_row is None:
+        return
+    
+    user = User()
+    user.id = username
+    user.role = user_row['user_role']
+
+    return user
+```
+* Instantiate the `LoginManager` and configure it to redirect to `login` view that we wrote earlier.
+* The `User` class will contain the information about the currently logged-in user. Flask-Login expects this class to implement methods such as `is_authenticated()` and `is_active()`. For a logged-in user, these two methods usually return True so to save effort, Flask provides a sensible base class `UserMixin`. Our `User` class inherits from `UserMixin`.
+* Define the user_loader: the function takes a user name and retrieves the corresponding row in the database. It then populates a new `User` object with the information and returns it. Right now, we only need to store the ID and the user's role in the `User` instance.
+
+Now we are ready to finish the `login` view:
+```python
+@app.route('/login', methods=('GET', 'POST'))
+def login():
+
+    db = connect_db()
+    form = LoginForm()
+    
+    if form.validate_on_submit():
+
+        username = form.username.data
+        password = form.password.data
+
+        user_row = db.execute("select * from user u where u.username = ?", (username,)).fetchone()
+        
+        if user_row is not None and pbkdf2_sha256.verify(password, user_row['password_hash']):
+            user = User()
+            
+            user.id = username
+            flask_login.login_user(user)
+            return redirect(url_for('home'))
+        flash('Incorrect Credentials')
+    
+    return render_template('login.html', form=form)
+
+@app.route('/logout')
+def logout():
+    flask_login.logout_user()
+    return redirect(url_for('login'))
+```
+* The code attempts to retrieve the user's row from the database.
+* If such row exists, it performs a hash comparison via `passlib`
+* If the hashes are equal, we log the user in by calling `flask_login.login_user()` and redirect to the `home` view
+* The `logout` view just logs out the currently logged in user and redirects to the login view.
+
+Before you try this out, there is critical issue: the `connect_db()` function. Remember, this function opens a new connection to the database. But our `user_loader` also opens a connection to the database, so we'll end up with two open connections. What we really want is:
+
+* `connect_db()` should either open a new connection or return an existing one (this is known as lazy loading)
+* The database connection should automatically be closed when the request is finished. So we don't need to do `db.close()` everywhere.
+
+Let us make changes to `rgsapp.py` that achieve these two objectives.
+
+1. Add `g` to the list of flask imports:
+```python
+from flask import Flask, render_template, abort, request, redirect, url_for, flash, send_from_directory, g
+```
+`g` is a simple container of global variables relevant to the _current request_. It is a good place to store things such as database connections or file handles but it gets destroyed when the request ends, so don't use it to store data between requests.
+
+2. Change `connect_db()`:
+```python
+def connect_db():
+    
+    def dict_factory(cursor, row):
+        d = {}
+        for idx, col in enumerate(cursor.description):
+            d[col[0]] = row[idx]
+        return d
+    
+    if 'db' not in g:
+        g.db = db = sqlite3.connect(app.config['db_path'],
+                         detect_types=sqlite3.PARSE_DECLTYPES)
+        db.row_factory = dict_factory
+    
+    return g.db
+```
+We store the database connection in `g.db`, so we first check if `g` has an attribute called `db`. If it does, we simply return `g.db`. Otherwise, we create a new connection and store it in `g.db`.
+
+3. Remove all calls to `db.close()` in the file (find and replace would work well here)
+
+4. Add a function `close_db`:
+```python
+@app.teardown_appcontext
+def close_db(error):
+    # removes an attribute by name
+    db = g.pop('db', None)
+
+    if db:
+        db.close()
+```
+We remove the attribute `db` from the object `g` by using the `pop` function, which returns the attribute that was removed or `None` if no such attribute exists. If there was an active database connection, we close it with `db.close()`. Finally, we tell Flask to call `close_db` when the request is done by decorating `close_db` with `app.teardown_appcontext`.
+
+Moment of truth. Go to `localhost:5000/login` and enter incorrect credentials. You should see 'incorrect credentials' message at the top. Try again with correct credentials (e.g., username: user1, password: hello world 2), and you should be redirected to the home view.
+
+Let's modify the templates so that they display the currently logged in user and a link to the logout view.
+
+1. Modify `base.html`:
+```html
+{% if user %}
+  <strong>Current User:</strong> {{ user.id }} (<a href="{{ url_for('logout') }}">Logout</a>)
+{% endif %}
+```
+`user` will be the `User` object that `Flask-Login` stores. If the user is logged in, we display a logout link.
+
+2. Modify the `home` view so that `user` is passed to the template:
+```python
+output = render_template('home.html', presentations=presentations, user=flask_login.current_user)
+```
+
+3. Refresh `localhost:5000`, you should see the ID of the currently logged in user at the top along with a logout link.
+
+4. Click the logout link, and you should be redirected to the login page.
+
+> **Exercise**: modify the code so that the user is passed to all templates. Can you think of a more elegant way than just passing the user argument explicitly to every `render_template` call?
+
+## Restricting Views to Logged In Users
+
+Our login and logout processes are working, but we are not really controlling access to our views. Flask-Login provides a decorator `@flask_login.login_required` which indicates that the view function is restricted to logged in users only.
+
+1. Open `rgsapp.py` and add the decorator `@flask_login.login_required` to all views **except** the `login` and `logout` views.
+2. Make sure you are logged out. 
+3. Go to `localhost:5000`: you should be redirected to the `login` view with a message "Please log in to access this page."
+4. Now log in and make sure that you can access the pages as normal.
+
+## Authorization
+
+We want to take this a step further and only allow _admins_ to change the presentation schedule. Remember that `flask_login.current_user` refers to the currently logged user, and that our `user_loader` stores the `role` of the user in that object. Basically, we want to restrict create/edit/delete views to users with the role of `admin`. We could, in principle, do this check in every one of those views, but that would be ugly. Lets do the Pythonic thing and use a decorator.
+
+> **NOTE**: If the user's not logged in, `flask_login.current_user` is not `None`! Instead, it is set to an instance of `AnonymousUserMixin`. This object has `is_authenticated` and `is_active` functions, but both of them return `False`.
+
+> ## Decorators ... Round Two
+> Remember than in Python, functions are first-class objects. So just like a class, a function has attributes. For example, you can get the function's name with the `__name__` attribute: 
+> ```python
+> >>> def greet(name):
+> >>>  return "Hello %s" % (name)
+> >>> greet.__name__
+> 'greet'
+> ```
+> This is what Flask's `route` decorator uses to create a dictionary from function names to URL patterns: it gets the function name using the `__name__` attribute of the decorated function. When you call `url_for('home')`, Flask looks up the URL pattern that corresponds to function name 'home' and uses it to generate the final URL. 
+>
+> But now consider what happens to `__name__` when you decorate the function:
+> ```python
+> def strong(func):
+>  def wrapper(name):
+>   return "<strong>%s</strong>" % (name)
+>  return wrapper
+> greet = strong(greet)
+> greet.__name__
+> 'wrapper'
+> ```
+> Ooops! since the `strong` decorator is returning the nested function named `wrapper`, this is what `__name__` of `greet` show. If you use this decorator on Flask views, you will see error messages about multiple views having the same name, or that certain names do not exist. The decorator is changing the name of the decorated function.
+> To fix this, Python provides a function which retains the name of the decorated function:
+> ```python
+> >>> from functools import wraps
+> >>> def strong(func):
+> >>>  @wraps(func)
+> >>>  def wrapper(name):
+> >>>   return "<strong>%s</strong>" % (name)
+> >>>  return wrapper
+> >>> @strong
+> >>> def greet(name):
+> >>>  return "Hello %s" % (name)
+> >>> greet('Noura')
+> 'Hello Noura'
+> >>> greet.__name__
+> 'greet'
+> ```
+> Yay!
+
+We'll define a decorator that limits access to views based on the user's role. 
+```python
+from functools import wraps
+...
+def requires_role(role):
+    def decorator(func):
+        @functools.wraps(func)
+        def f(*args, **kwargs):
+            if not flask_login.current_user.is_authenticated:
+                abort(401)
+            
+            u = flask_login.current_user
+            
+            # if you are an admin, you have access to anything
+            # otherwise, make sure your role is the same as the
+            # required role
+            if  u.role != 'admin' and u.role != role:
+                abort(401)
+            return func(*args, **kwargs)
+        return f
+    return decorator
+
+@app.route('/')
+...
+```
+The function checks that the user is not anonymous and then ensures that they have the same role as what is required. If the user has `admin` role, they will have access to everything.
+
