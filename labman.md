@@ -1366,7 +1366,7 @@ INSERT INTO user VALUES(null, 'user1', '$pbkdf2-sha256$29000$prSW8j4nhHDundOac04
 * Each user has username, role, and a hashed password. **Never** store the password in your database, instead use a hashing library to store a hashed version of the password. Good hashing algorithms generate (almost) unique strings for a given input text. The operation is destructive: it is usually not possible to recover the input text, given a hashed version. Because of this, storing the hashed passwords ensures that even if the database is compromised, attackers cannot recover the original passwords.
 * The insert statements for users `mmkhajah` and `user1` use the SHA256 hashed versions of the passwords `hello world` and `hello world 2`, respectively.
 
-We'll also need the `Flask-Login` which takes care of the details of managing user sessions via cookies, and the `passlib` library which hashes passwords securily:
+We'll also need the `Flask-Login` which takes care of the details of managing user sessions over multiple requests, and the `passlib` library which hashes passwords securely:
 ```sh
 $ pip install flask-login passlib
 ```
