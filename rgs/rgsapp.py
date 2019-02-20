@@ -4,15 +4,19 @@ from forms import PresentationForm, LoginForm
 import db
 import uploads_manager
 import auth
+import default_settings
+import os
 
-app = Flask(__name__)
-app.config['db_path'] = 'db.sqlite'
-app.config['uploads_path'] = './uploads'
-app.secret_key = b'xYFRlEs3@a'
+app = Flask(__name__, instance_relative_config=True)
+app.config.from_object('default_settings')
+app.config.from_pyfile('application.cfg', silent=True)
+app.config['UPLOADS_PATH'] = os.path.join(app.instance_path, app.config['UPLOADS_PATH'])
+app.config['DB_PATH'] = os.path.join(app.instance_path, app.config['DB_PATH'])
+
 app.teardown_appcontext(db.close_db)
 auth.init(app, 'login')
 
-uploads = uploads_manager.UploadsManager(app.config['uploads_path'], 'attachments')
+uploads = uploads_manager.UploadsManager(app.config['UPLOADS_PATH'], 'attachments')
 
 render_template_old = render_template
 def new_render_template(*args, **kwargs):
@@ -113,7 +117,7 @@ def getfile(aid):
     if attachment is None:
         abort(404)
         
-    return send_from_directory(app.config['uploads_path'], attachment['filename'], as_attachment=True)
+    return send_from_directory(app.config['UPLOADS_PATH'], attachment['filename'], as_attachment=True)
     
 @app.route('/delete_attachment/<int:aid>', methods=('POST',))
 @auth.login_required

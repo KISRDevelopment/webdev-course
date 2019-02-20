@@ -1798,7 +1798,7 @@ def connect_db():
         return d
     
     if 'db' not in g:
-        g.db = db = sqlite3.connect(current_app.config['db_path'],
+        g.db = db = sqlite3.connect(current_app.config['DB_PATH'],
                          detect_types=sqlite3.PARSE_DECLTYPES)
         db.row_factory = dict_factory
     
@@ -2029,13 +2029,13 @@ import uploads_manager
 import auth
 
 app = Flask(__name__)
-app.config['db_path'] = 'db.sqlite'
-app.config['uploads_path'] = './uploads'
+app.config['DB_PATH'] = 'db.sqlite'
+app.config['UPLOADS_PATH'] = './uploads'
 app.secret_key = b'xYFRlEs3@a'
 app.teardown_appcontext(db.close_db)
 auth.init(app, 'login')
 
-uploads = uploads_manager.UploadsManager(app.config['uploads_path'], 'attachments')
+uploads = uploads_manager.UploadsManager(app.config['UPLOADS_PATH'], 'attachments')
 
 render_template_old = render_template
 def new_render_template(*args, **kwargs):
@@ -2136,7 +2136,7 @@ def getfile(aid):
     if attachment is None:
         abort(404)
         
-    return send_from_directory(app.config['uploads_path'], attachment['filename'], as_attachment=True)
+    return send_from_directory(app.config['UPLOADS_PATH'], attachment['filename'], as_attachment=True)
     
 @app.route('/delete_attachment/<int:aid>', methods=('POST',))
 @auth.login_required
@@ -2185,6 +2185,111 @@ def logout():
 * We want to inject the currently logged in user into the template context for all views, but we don't want to do it manually by passing `user` to each call to `render_template`. Instead, we _replace_ the `render_template` function which we import from `flask`, with a function that injects `user` into the template context. The function then calls the original `render_template`. Python's dynamic nature in action!
 * Database access is now mostly reduced to one liners, which makes it clearer what each view is doing.
 * We use `form.data` which returns a dictionary of field names to field values. The returned dictionary is directly interpreted as a presentation dictionary. 
+* We changed configuration variable names on `app.config` to upper case letters because this is what Flask expects when loading configuration from external files, as we'll do in the next section.
 
 Run the application to make sure everything still works.
+
+# Configuration Handling
+
+So far we've hardcoded our application configuration into the `rgsapp.py`. But this is not sustainable for two reasons:
+* We may have multiple configuations: development, test, production. Each configuration has its own database, secret key, uploads directory, etc.
+* It's a bad idea to hardcode secret keys into the application.
+
+Edit `rgsapp.py` by removing the previous `app.config` lines and replacing them with:
+```python
+...
+import default_settings
+
+app = Flask(__name__)
+app.config.from_object('default_settings')
+app.config.from_envvar('RGS_SETTINGS', silent=True)
+
+```
+* Default configuration settings are loaded from a Python file called `default_settings.py` that resides in `rgsapp`
+* The environment variable `RGS_SETTINGS` can be used to specify the path to a configuration file to override the default configuration. If no such environment variable exists, the defaults won't be overriden.
+* The configuration files are normal Python scripts.
+
+Create a new file called `default_settings.py` in `rgsapp`, which will contain default app configuration:
+```python
+SECRET_KEY = b'_5#y2L"F4Q8z\n\xec]/'
+DB_PATH = 'db.sqlite'
+UPLOADS_PATH = 'uploads'
+```
+Now stop and restart the server. Everything should work normally.
+
+For the sake of illustration, let's define another configuration file, `rgs.config2`:
+```python
+SECRET_KEY = b'_5#y2L"7567\n\xec]/'
+DB_PATH = 'db2.sqlite'
+UPLOADS_PATH = 'uploads2'
+```
+Make sure to:
+* Create a folder `uploads2` under `rgsapp`
+* Create a copy of the database: `cp db.sqlite db2.sqlite`
+
+Now:
+1. Stop the flask server
+2. `export RGS_SETTINGS=rgs.config2` in UNIX or `set RGS_SETTINGS=rgs.config2` on Windows
+3. `flask run`
+4. Play around with the app for a while
+5. Terminate the server
+6. `unset RGS_SETTINGS` on UNIX or `set RGS_SETTINGS=` on Windows
+7. `flask run`
+
+You will notice several things:
+* If you were logged in before, you will be immediately thrown out and required to login. The two configuration files use different secret keys for signing the cookies. So the stored signature and the expected signature is no longer the same.
+* Uploads are stored in either `uploads` or `uploads2`, depending on the configuration.
+* Additions/edits/deletions in one config don't appear in the other, because they use different databases.
+
+Annoyingly, Flask ignores `ENV` and `DEBUG` conifguration variables if they are specified in code or in the configuratin file. The reason they give is that it is too late to switch modes if these two variables are read from code or config files. In short, you still have to use `export FLASK_ENV=...` to switch modes between production and development.
+
+# Deployment
+
+Before proceeding, make sure to stop the flask server and unset the `RGS_SETTINGS` environment variable.
+
+## Instance Folders
+For deployment, it is a best to keep the configuration and  dynamic resources, such as the database and uploads, in one location. The same app code can then be used to host multiple deployments, with each deployment being located at a different folder. These dynamic app resources will then be kept out of source control.
+
+Flask has the concept of _instance folders_ which allow the user to specify the base path under which dynamic resources will be located. By default, the instance folder for our project is `instance` under `rgs`. We are not making use of this folder yet because we are just specifying the paths to our database and upload folders relative to the application, not the instance path. Let's change that.
+
+1. Change the `app` creation in `rgsapp.py` to:
+```python
+import os
+
+app = Flask(__name__, instance_relative_config=True)
+app.config.from_object('default_settings')
+app.config.from_pyfile('application.cfg', silent=True)
+app.config['UPLOADS_PATH'] = os.path.join(app.instance_path, app.config['UPLOADS_PATH'])
+app.config['DB_PATH'] = os.path.join(app.instance_path, app.config['DB_PATH'])
+```
+* The `instance_relative_config=True` argument tells Flask to load configuration files relative to the instance path.
+* The code will first load the default settings as before, but then it will try to load settings from the `instance/application.cfg` python file. If no such file exists, it will not override the default settings.
+* The last two lines define the upload and database path relative to the instance path (which Flask conveniently makes available at `app.instance_path`), rather than the application root. 
+
+2. Modify `initdb.py` so that it takes an argument specifying the path to the database:
+```python
+import sqlite3
+import sys
+path = sys.argv[1]
+db = sqlite3.connect(path, detect_types=sqlite3.PARSE_DECLTYPES)
+...
+```
+* `sys` is a built-in Python library for interacting with the system.
+* `sys.argv` is an array containing the arguments passed to the Python script. `sys.argv[0]` is the script name, and subsequent elements correspond to the arguments so `sys.argv[1]` is the first argument and so on.
+
+3. Remove the `uploads` folder and `db.sqlite` from `rgs`
+4. Under `rgs`, run `mkdir instance` then `mkdir instance/uploads` (use backslash for Windows)
+5. Run `python initdb.py instance/db.sqlite` (again, backslash on Windows)
+6. Run `flask run`. The app should work normally.
+
+The application loads the default settings but then fails to load `instance/application.cfg` because no such file exists. Since both `DB_PATH` and `UPLOADS_PATH` are now relative to the instance path, the app uses the database and uploads folder that are under `instance`.
+
+What is the big deal? after all, the instance path is still fixed at `./instance`, so how is this any different from what we had before? the answer is in the next section.
+
+## Production Web Server
+
+
+# Bits and Pieces
+
+## JSON Endpoints
 

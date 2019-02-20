@@ -17,7 +17,7 @@ def connect_db():
         return d
     
     if 'db' not in g:
-        g.db = db = sqlite3.connect(current_app.config['db_path'],
+        g.db = db = sqlite3.connect(current_app.config['DB_PATH'],
                          detect_types=sqlite3.PARSE_DECLTYPES)
         db.row_factory = dict_factory
     
