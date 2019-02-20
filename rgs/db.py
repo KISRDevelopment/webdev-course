@@ -1,5 +1,11 @@
+#
+# Database access routines
+#
 import sqlite3
-from flask import g
+from flask import g, current_app
+
+PRESENTATION_COLS = ['title', 'presenters', 'scheduled', 'time_range', 'notes']
+ATTACHMENT_COLS = ['presentation_id', 'filename']
 
 def connect_db():
     """ creates a new connection to a database, if one does not
@@ -11,64 +17,69 @@ def connect_db():
         return d
     
     if 'db' not in g:
-        g.db = db = sqlite3.connect(app.config['db_path'],
+        g.db = db = sqlite3.connect(current_app.config['db_path'],
                          detect_types=sqlite3.PARSE_DECLTYPES)
         db.row_factory = dict_factory
     
     return g.db
 
-def close_db():
+def close_db(error):
     """ closes the connection to the database, if one exists """
     db = g.pop('db', None)
     if db:
+        db.commit() # save changes
         db.close()
 
 def get_presentations_summary():
-    """ gets list of all presentations, without attachments list"""
     presentations = connect_db().execute("select * from presentation")
     return presentations
 
 def get_presentation(pid):
-    """ gets a presentation by id along with notes """
     presentation = connect_db().execute("select * from presentation p where p.id = ?", (pid,)).fetchone()
     if presentation is None:
         return None 
     
-    attachments = connect_db().execute("select * from attachment a where a.presentation_id = ?", (pid,))
-    presentation['attachments'] = list(attachments)
+    presentation['attachments'] = get_attachments(pid)
 
     return presentation
 
 def create_presentation(presentation):
-    """ adds the given presentation to the database """
-    db = connect_db()
+    pid = _insert('presentation', presentation, PRESENTATION_COLS)
     
-    pid = _insert('presentation', presentation, ['title', 'presenters', 'scheduled', 'time_range', 'notes'])
-    
-    for a in attachments:
+    for a in presentation['attachments']:
         a['presentation_id'] = pid
-        _insert('attachment', a, ['presentation_id', 'filename'])
+        _insert('attachment', a, ATTACHMENT_COLS)
     
-    db.commit()
 
 def update_presentation(presentation):
-    """ updates an existing presentation """
+    _update('presentation', presentation, PRESENTATION_COLS)
 
+    # insert attachments which have no ID
+    for a in presentation['attachments']:
+        if 'id' not in a:
+            a['presentation_id'] = presentation['id']
+            _insert('attachment', a, ATTACHMENT_COLS)
 
-def delete_presentation(presentation):
-    pass
+def delete_presentation(pid):
+    connect_db().execute("delete from attachment where presentation_id = ?", (pid,))
+    connect_db().execute("delete from presentation where id = ?", (pid,))
+
+def get_attachments(pid):
+    attachments = connect_db().execute("select * from attachment a where a.presentation_id = ?", (pid,))
+    return list(attachments)
 
 def get_attachment(aid):
-    pass
+    attachment = connect_db().execute("select * from attachment a where a.id=?", (aid,)).fetchone()
+    return attachment
 
 def delete_attachment(aid):
-    pass
+    connect_db().execute("delete from attachment where id=?", (aid,))
 
 def get_user(username):
-    pass
+    return connect_db().execute("select * from user u where u.username = ?", (username,)).fetchone()
 
 def _insert(table, r, columns=None):
-
+    """ helper function for writing insert queries """
     if not columns:
         columns = list(r.keys())
     
@@ -77,7 +88,7 @@ def _insert(table, r, columns=None):
 
     query = "insert into %s(%s) values(%s)" % (table, columns_str, placeholders_str)
 
-    vals = [r[k] for k in columns]
+    vals = [r[c] for c in columns]
 
     db = connect_db()
     cursor = db.execute(query, vals)
@@ -87,5 +98,15 @@ def _insert(table, r, columns=None):
     return pid
 
 def _update(table, r, columns=None):
+    """ helper function for writing update queries """
+    if not columns:
+        columns = [c for c in list(r.keys()) if c != 'id']
 
-    
+    columns_str = ', '.join(['%s=?' % (c) for c in columns])
+
+    query = "update %s set %s where id=%d" % (table, columns_str, r['id'])
+
+    vals = [r[c] for c in columns]
+
+    connect_db().execute(query, vals)
+

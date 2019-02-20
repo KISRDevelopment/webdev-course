@@ -649,7 +649,7 @@ The `form` tag has a `post` method because we intend to change the data on the s
 
 Each form field we want to submit should have a `name` attribute so that the server can access it. Some fields have a `required` attribute which lets the browser do some basic validation checks which otherwise would need to be done in Javascript (yay!).
 
-2. Add a new route for the creation form in `presentations-list.py`:
+2. Add a new route for the creation form in `rgsapp.py`:
 ```python
 @app.route('/create', methods=('GET', 'POST'))
 def create():
@@ -1770,3 +1770,421 @@ Now login to the website as an admin `mmkhajah` and check that you can still cre
 > 12
 > ```
 > When calling a function, `*myvals` _unpacks_ the values of the array into the arguments of the function. Similarily, `**myvals` unpacks the dictionary into keyword arguments of the function. 
+
+# Cleaning Up
+
+Our application code is mixing SQL database access, file system access, authentication and authorization, and presentation in one place. This is generally a bad idea because you cannot modify on aspect without affecting the other. 
+
+
+## Database Access
+Create `db.py` in `rgsapp` folder:
+```python
+#
+# Database access routines
+#
+import sqlite3
+from flask import g, current_app
+
+PRESENTATION_COLS = ['title', 'presenters', 'scheduled', 'time_range', 'notes']
+ATTACHMENT_COLS = ['presentation_id', 'filename']
+
+def connect_db():
+    """ creates a new connection to a database, if one does not
+    exist already within the current request"""
+    def dict_factory(cursor, row):
+        d = {}
+        for idx, col in enumerate(cursor.description):
+            d[col[0]] = row[idx]
+        return d
+    
+    if 'db' not in g:
+        g.db = db = sqlite3.connect(current_app.config['db_path'],
+                         detect_types=sqlite3.PARSE_DECLTYPES)
+        db.row_factory = dict_factory
+    
+    return g.db
+
+def close_db(error):
+    """ closes the connection to the database, if one exists """
+    db = g.pop('db', None)
+    if db:
+        db.commit() # save changes
+        db.close()
+
+def get_presentations_summary():
+    presentations = connect_db().execute("select * from presentation")
+    return presentations
+
+def get_presentation(pid):
+    presentation = connect_db().execute("select * from presentation p where p.id = ?", (pid,)).fetchone()
+    if presentation is None:
+        return None 
+    
+    presentation['attachments'] = get_attachments(pid)
+
+    return presentation
+
+def create_presentation(presentation):
+    pid = _insert('presentation', presentation, PRESENTATION_COLS)
+    
+    for a in presentation['attachments']:
+        a['presentation_id'] = pid
+        _insert('attachment', a, ATTACHMENT_COLS)
+    
+
+def update_presentation(presentation):
+    _update('presentation', presentation, PRESENTATION_COLS)
+
+    # insert attachments which have no ID
+    for a in presentation['attachments']:
+        if 'id' not in a:
+            a['presentation_id'] = presentation['id']
+            _insert('attachment', a, ATTACHMENT_COLS)
+
+def delete_presentation(pid):
+    connect_db().execute("delete from attachment where presentation_id = ?", (pid,))
+    connect_db().execute("delete from presentation where id = ?", (pid,))
+
+def get_attachments(pid):
+    attachments = connect_db().execute("select * from attachment a where a.presentation_id = ?", (pid,))
+    return list(attachments)
+
+def get_attachment(aid):
+    attachment = connect_db().execute("select * from attachment a where a.id=?", (aid,)).fetchone()
+    return attachment
+
+def delete_attachment(aid):
+    connect_db().execute("delete from attachment where id=?", (aid,))
+
+def get_user(username):
+    return connect_db().execute("select * from user u where u.username = ?", (username,)).fetchone()
+
+def _insert(table, r, columns=None):
+    """ helper function for writing insert queries """
+    if not columns:
+        columns = list(r.keys())
+    
+    columns_str = ','.join(columns)
+    placeholders_str = ','.join(['?'] * len(columns))
+
+    query = "insert into %s(%s) values(%s)" % (table, columns_str, placeholders_str)
+
+    vals = [r[c] for c in columns]
+
+    db = connect_db()
+    cursor = db.execute(query, vals)
+    
+    pid = cursor.lastrowid
+
+    return pid
+
+def _update(table, r, columns=None):
+    """ helper function for writing update queries """
+    if not columns:
+        columns = [c for c in list(r.keys()) if c != 'id']
+
+    columns_str = ', '.join(['%s=?' % (c) for c in columns])
+
+    query = "update %s set %s where id=%d" % (table, columns_str, r['id'])
+
+    vals = [r[c] for c in columns]
+
+    connect_db().execute(query, vals)
+```
+We have moved all SQL database access logic into nice small functions.  The last two functions, `_insert` and `_update`, are helper functions that automatically generate the appropriate SQL queries with placeholders.  
+
+The power of this approach is that if we decide in the future to move to another SQL database, such as Postgres, we only need to edit or replace `db.py`.
+
+## Filesystem Management
+
+Some of the code in `rgsapp.py` saves and deletes attachments. Saving attachments is duplicated between the `create` and `edit` views. While deleting attachments is duplicated between `delete` and `delete_attachment` views. We'll create a class that abstracts those details away.
+
+Create `uploads_manager.py` in `rgsapp`:
+```python
+import os
+from werkzeug.utils import secure_filename
+from flask import request
+import random
+import string
+
+class UploadsManager:
+
+    def __init__(self, path, field_name):
+        self.path = path
+        self.field_name = field_name
+
+    def save(self):
+        filenames = []
+        if self.field_name in request.files:
+           for f in request.files.getlist(self.field_name):
+                filename = generate_file_name(f.filename)
+                f.save(os.path.join(self.path, filename))
+                filenames.append(filename)
+        return filenames
+
+    def delete(self, attachment):
+        path = os.path.join(self.path, attachment['filename'])
+        if os.path.isfile(path):
+            os.remove(path)
+    
+    def delete_all(self, attachments):
+        for attachment in attachments:
+            self.delete(attachment)
+
+def generate_file_name(filename):
+    prefix = randstr(8)
+    filename = '%s-%s' % (prefix, secure_filename(filename))
+    return filename
+
+# from stackoverflow ...
+def randstr(N):
+    return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(N))
+```
+This file defines a single class which handles saving and deleting attachments on the file system. The class has three methods: `save` saves all the attachments in the current request to the file system, `delete` removes a specific attachment from the file system, and `delete_all` is a convenience method that deletes all attachments in an array from the file system. Most of the logic has been copied from our old code in `rgsapp.py`.
+
+## Authentication and Authorization
+
+It would be nice if we can isolate our main application code from the specific authentication library used. Similarily to refactoring the database access code, this allows us to replace the authentication system by only changing or editing one file.
+
+Create a file `auth.py`:
+```python
+import flask_login
+import db
+import functools
+from passlib.hash import pbkdf2_sha256
+from flask import abort
+
+# just an alias ...
+login_required = flask_login.login_required
+
+# This class represents the currently logged in user
+class User(flask_login.UserMixin):
+    pass
+
+def init(app, login_view):
+    login_manager = flask_login.LoginManager()
+    login_manager.login_view = login_view
+    login_manager.user_loader(user_loader)
+    login_manager.init_app(app)
+
+def current_user():
+    return flask_login.current_user
+
+def user_loader(username):
+    """ given a user name, return a User object representing
+    the logged in user, or None if no such username exists. """
+    user_row = db.get_user(username)
+    
+    if not user_row:
+        return None
+
+    user = User()
+    user.id = username
+    user.role = user_row['user_role']
+
+    return user
+
+def requires_role(role):
+    """ requires that a user have a specific role to access
+    the view """
+    def decorator(func):
+        @functools.wraps(func)
+        def f(*args, **kwargs):
+            if not flask_login.current_user.is_authenticated:
+                abort(401)
+            
+            u = flask_login.current_user
+            
+            if  u.role != 'admin' and u.role != role:
+                abort(401)
+            return func(*args, **kwargs)
+        return f
+    return decorator
+
+def authenticate(username, password):
+    user_row = db.get_user(username)
+    if user_row is None:
+        return False
+    return pbkdf2_sha256.verify(password, user_row['password_hash'])
+
+def login_user(username):
+    user = User()
+    user.id = username
+    flask_login.login_user(user)
+
+def logout_user():
+    flask_login.logout_user()
+```
+As far as the application is concerned, an authentication library should provide three main functions: a way to authenticate a username/password, a way to log a user in, and a way to log a user out. These functions correspond to the last three functions in the file. We also define some aliases that hide the fact that we are using `flask-login` from the calling code. Finally, our authorization decorator, `requires_role` has been copied to this new library.
+
+## Putting it Together
+
+Let's update `rgsapp.py` now that we have moved most of the functionality outside:
+```python
+from flask import Flask, render_template, abort, request, redirect, url_for, flash, \
+    send_from_directory, g
+from forms import PresentationForm, LoginForm
+import db
+import uploads_manager
+import auth
+
+app = Flask(__name__)
+app.config['db_path'] = 'db.sqlite'
+app.config['uploads_path'] = './uploads'
+app.secret_key = b'xYFRlEs3@a'
+app.teardown_appcontext(db.close_db)
+auth.init(app, 'login')
+
+uploads = uploads_manager.UploadsManager(app.config['uploads_path'], 'attachments')
+
+render_template_old = render_template
+def new_render_template(*args, **kwargs):
+    kwargs['user'] = auth.current_user()
+    return render_template_old(*args,**kwargs)
+render_template = new_render_template
+
+@app.route('/')
+@auth.login_required
+def home():
+    
+    presentations = db.get_presentations_summary()
+    output = render_template('home.html', presentations=presentations)
+
+    return output
+    
+@app.route('/presentation/<int:pid>')
+@auth.login_required
+def details(pid):
+    presentation = db.get_presentation(pid)
+    return render_template('details.html', p=presentation)
+    
+@app.route('/create', methods=('GET', 'POST'))
+@auth.login_required
+@auth.requires_role('admin')
+def create():
+    form = PresentationForm()
+    
+    if form.validate_on_submit():
+        
+        filenames = uploads.save()
+        
+        presentation = form.data
+        presentation['attachments'] = [{ 'filename' : a } for a in filenames]
+
+        db.create_presentation(presentation)
+
+        flash('Presentation has been added')
+        return redirect(url_for('home'))
+    
+    return render_template('create.html', form=form)
+   
+@app.route('/edit/<int:pid>', methods=('GET', 'POST'))
+@auth.login_required
+@auth.requires_role('admin')
+def edit(pid):
+    
+    presentation = db.get_presentation(pid)
+
+    if presentation is None:
+        abort(404)
+    
+    form = PresentationForm(data=presentation)
+    
+    if form.validate_on_submit():
+
+        # upload attachments
+        filenames = uploads.save()
+        
+        old_attachments = presentation['attachments']
+
+        presentation = form.data
+        presentation['id'] = pid
+        presentation['attachments'] = old_attachments + [
+            { 'filename' : a, 'presentation_id' : pid } 
+            for a in filenames
+        ]
+        
+        db.update_presentation(presentation)
+
+        flash('Presentation has been edited')
+        return redirect(url_for('home'))
+    
+    return render_template('edit.html', form=form, pid=pid, 
+        attachments=presentation['attachments'])
+    
+@app.route('/delete/<int:pid>', methods=('POST',))
+@auth.login_required
+@auth.requires_role('admin')
+def delete(pid):
+
+    presentation = db.get_presentation(pid)
+    if not presentation:
+        abort(404)
+
+    uploads.delete_all(presentation['attachments'])
+    
+    db.delete_presentation(pid)
+
+    flash('Presentation deleted.')
+    return redirect(url_for('home'))
+    
+@app.route('/getfile/<int:aid>', methods=('GET',))
+@auth.login_required
+def getfile(aid):
+    attachment = db.get_attachment(aid)
+
+    if attachment is None:
+        abort(404)
+        
+    return send_from_directory(app.config['uploads_path'], attachment['filename'], as_attachment=True)
+    
+@app.route('/delete_attachment/<int:aid>', methods=('POST',))
+@auth.login_required
+@auth.requires_role('admin')
+def delete_attachment(aid):
+    
+    attachment = db.get_attachment(aid)
+
+    if attachment is None:
+        abort(404)
+    
+    uploads.delete(attachment)
+
+    db.delete_attachment(aid)
+
+    flash('Attachment %s has been removed' % attachment['filename'])    
+    return redirect(url_for('edit', pid=attachment['presentation_id']))
+    
+@app.route('/login', methods=('GET', 'POST'))
+def login():
+
+    if not auth.current_user().is_anonymous:
+        return redirect(url_for('home'))
+
+    form = LoginForm()
+    
+    if form.validate_on_submit():
+
+        username = form.username.data
+        password = form.password.data
+
+        if auth.authenticate(username, password):
+            auth.login_user(username)
+            return redirect(url_for('home'))
+
+        flash('Incorrect Credentials')
+    
+    return render_template('login.html', form=form)
+    
+@app.route('/logout')
+def logout():
+    auth.logout_user()
+    return redirect(url_for('login'))
+```
+* File management is now handled by `uploads` which is an instance of the `UploadManager` class. Notice how files in both `create` and `edit` views are saved with one line: `uploads.save()`.
+* We want to inject the currently logged in user into the template context for all views, but we don't want to do it manually by passing `user` to each call to `render_template`. Instead, we _replace_ the `render_template` function which we import from `flask`, with a function that injects `user` into the template context. The function then calls the original `render_template`. Python's dynamic nature in action!
+* Database access is now mostly reduced to one liners, which makes it clearer what each view is doing.
+* We use `form.data` which returns a dictionary of field names to field values. The returned dictionary is directly interpreted as a presentation dictionary. 
+
+Run the application to make sure everything still works.
+
