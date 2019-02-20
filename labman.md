@@ -1533,6 +1533,7 @@ def user_loader(username):
 
     return user
 ```
+Here we:
 * Instantiate the `LoginManager` and configure it to redirect to `login` view that we wrote earlier.
 * The `User` class will contain the information about the currently logged-in user. Flask-Login expects this class to implement methods such as `is_authenticated()` and `is_active()`. For a logged-in user, these two methods usually return True so to save effort, Flask provides a sensible base class `UserMixin`. Our `User` class inherits from `UserMixin`.
 * Define the user_loader: the function takes a user name and retrieves the corresponding row in the database. It then populates a new `User` object with the information and returns it. Right now, we only need to store the ID and the user's role in the `User` instance.
@@ -1624,7 +1625,7 @@ Let's modify the templates so that they display the currently logged in user and
 
 1. Modify `base.html`:
 ```html
-{% if user %}
+{% if user.id %}
   <strong>Current User:</strong> {{ user.id }} (<a href="{{ url_for('logout') }}">Logout</a>)
 {% endif %}
 ```
@@ -1656,7 +1657,7 @@ We want to take this a step further and only allow _admins_ to change the presen
 
 > **NOTE**: If the user's not logged in, `flask_login.current_user` is not `None`! Instead, it is set to an instance of `AnonymousUserMixin`. This object has `is_authenticated` and `is_active` functions, but both of them return `False`.
 
-> ## Decorators ... Round Two
+> ### Decorators ... Round Two
 > Remember than in Python, functions are first-class objects. So just like a class, a function has attributes. For example, you can get the function's name with the `__name__` attribute: 
 > ```python
 > >>> def greet(name):
@@ -1693,7 +1694,7 @@ We want to take this a step further and only allow _admins_ to change the presen
 > >>> greet.__name__
 > 'greet'
 > ```
-> Yay!
+> The `@wraps` decorator decorates the `wrapper` function. It accepts one argument, which is the original decorated function `func`. `@wraps` sets the `__name__` attribute of the `wrapper` function to the `__name__` attribute of the original decorated function `func`. Thus, the name of the original decorated function is preserved and all is well.
 
 We'll define a decorator that limits access to views based on the user's role. 
 ```python
@@ -1720,5 +1721,52 @@ def requires_role(role):
 @app.route('/')
 ...
 ```
-The function checks that the user is not anonymous and then ensures that they have the same role as what is required. If the user has `admin` role, they will have access to everything.
+* This decorator is supposed to be applied to our view functions. Before executing each function, the decorator checks that the user is not anonymous and then ensures that they have the same role as `role`. If the user has `admin` role, they will have access to everything.
+* The syntax `def f(*args, **kwargs)` defines a function that takes any number of positional arguments followed by any number of keyword arguments. Our view functions have different _signatures_: some of them take no arguments, and some take one argument. We don't want to write a wrapper for each signature. The above mentioned syntax is a convenient way to handle different signatures.
+* The syntax `func(*args, **kwargs)` unpacks the position and keyword arguments and passes them to `func`.
 
+Apply this decorator as follows:
+```python
+@requires_role('admin')
+def create():
+    ...
+@requires_role('admin')
+def edit():
+    ...
+@requires_role('admin')
+def delete():
+    ...
+@requires_role('admin')
+def delete_attachment():
+    ...
+```
+
+Now login to the website as an admin `mmkhajah` and check that you can still create/edit/delete presentations. Then logout and login as a normal user and try to add a presentation. You should get an error page saying you're unauthorized.
+
+> ### Keyword Arguments ... Round Two
+> If your function signature has `*a` Python will make any positional  arguments, besides the main arguments, available inside the function as an array. For example, consider the following function which joins its' arguments with a separator:
+> ```python
+> >>> def joiner(sep, *a):
+> >>>  return sep.join(a)
+> >>> joiner(',', 'hello', 'world')
+> 'hello, world'
+> >>> joiner(';', 'hello', 'world')
+> 'hello; world'
+> ```
+> Notice how all positional arguments after the main argument, `sep`, are packed into an array called `a` inside the function. Similarily, if the signature has `**a`, all keyword arguments besides the main ones will be available as a dictionary called `a`. It is customary in call positional arguments `args` and keyword arguments `kwargs`, hence the signature `*args` and `**kwargs`. 
+> Now, suppose you have an array of values but you want to pass them as individual arguments to a function.
+> ```python
+> >>> def add(a, b, c):
+> >>>  return a + b + c
+> >>> myvals = [3, 4, 5]
+> >>> add(myvals)
+> Traceback (most recent call last):
+>  File "<stdin>", line 1, in <module>
+> TypeError: add() missing 2 required positional arguments: 'b' and 'c'
+> >>> add(*myvals)
+> 12
+> >>> myvals = { 'a' : 3, 'b' : 4, 'c': 5 }
+> >>> add(**myvals)
+> 12
+> ```
+> When calling a function, `*myvals` _unpacks_ the values of the array into the arguments of the function. Similarily, `**myvals` unpacks the dictionary into keyword arguments of the function. 
