@@ -2021,8 +2021,9 @@ As far as the application is concerned, an authentication library should provide
 
 Let's update `rgsapp.py` now that we have moved most of the functionality outside:
 ```python
-from flask import Flask, render_template, abort, request, redirect, url_for, flash, \
+from flask import Flask, abort, request, redirect, url_for, flash, \
     send_from_directory, g
+import flask
 from forms import PresentationForm, LoginForm
 import db
 import uploads_manager
@@ -2037,11 +2038,9 @@ auth.init(app, 'login')
 
 uploads = uploads_manager.UploadsManager(app.config['UPLOADS_PATH'], 'attachments')
 
-render_template_old = render_template
-def new_render_template(*args, **kwargs):
+def render_template(*args, **kwargs):
     kwargs['user'] = auth.current_user()
-    return render_template_old(*args,**kwargs)
-render_template = new_render_template
+    return flask.render_template(*args,**kwargs)
 
 @app.route('/')
 @auth.login_required
@@ -2286,10 +2285,55 @@ The application loads the default settings but then fails to load `instance/appl
 
 What is the big deal? after all, the instance path is still fixed at `./instance`, so how is this any different from what we had before? the answer is in the next section.
 
+But before that, let's make one more change to `initdb.py`: we'll make the script initialize an instance directory for us. This means creating the database, creating uploads folder, and generating an app configuration which specifies a strong secret key.
+
+```python
+import sqlite3
+import sys
+import os
+
+instance_path = sys.argv[1]
+
+# 1. create directories recursively
+uploads_path = os.path.join(instance_path, 'uploads')
+if not os.path.exists(uploads_path):
+    os.makedirs(uploads_path)
+
+# 2. initialize database
+db_path = os.path.join(instance_path, 'db.sqlite')
+db = sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
+script = open('schema.sql', 'r').read()
+db.executescript(script)
+db.close()
+
+# 3. generate strong key
+secret_key = os.urandom(16)
+#print(secret_key)
+
+# 4. create basic configuration file
+config_path = os.path.join(instance_path, 'application.cfg')
+with open(config_path, 'w') as f:
+    f.write('DB_PATH = %s\n' % repr('db.sqlite'))
+    f.write('UPLOADS_PATH = %s\n' % repr('uploads'))
+    f.write('SECRET_KEY = %s\n' % repr(secret_key))
+```
+We now have a handy script that preconfigures an instance folder for us. To try out, first remove the `instance` folder in `rgs` and then type:
+```sh
+python initdb.py instance
+```
+It should create the folder again with a database and app config. Run `flask run` and make sure everything still works.
+ 
 ## Production Web Server
 
+The Flask documentation does not recommend using `flask run` for production as it is _"not designed to be particularly efficient, stable, or secure"_. Instead, they recommend using a production quality server such as _waitress_, which I have used and found to be easy to work with.
 
-# Bits and Pieces
+1. `pip install waitress` or `conda install waitress`
+2. We are going to do something _big_: we'll wrap most of the code in `rgsapp.py` in a function called `create_app`. This function takes one argument: the `instance_path` which it internally passes to the `Flask` constructor. Doing this change will make it easy to start the production server.
 
-## JSON Endpoints
+
+## Reverse Proxy
+
+
+
+
 
