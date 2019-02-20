@@ -2322,14 +2322,68 @@ We now have a handy script that preconfigures an instance folder for us. To try 
 python initdb.py instance
 ```
 It should create the folder again with a database and app config. Run `flask run` and make sure everything still works.
- 
+
 ## Production Web Server
 
 The Flask documentation does not recommend using `flask run` for production as it is _"not designed to be particularly efficient, stable, or secure"_. Instead, they recommend using a production quality server such as _waitress_, which I have used and found to be easy to work with.
 
-1. `pip install waitress` or `conda install waitress`
-2. We are going to do something _big_: we'll wrap most of the code in `rgsapp.py` in a function called `create_app`. This function takes one argument: the `instance_path` which it internally passes to the `Flask` constructor. Doing this change will make it easy to start the production server.
+Run `pip install waitress` or `conda install waitress`
 
+We are going to do something _big_: we'll wrap most of the code in `rgsapp.py` in a function called `create_app`. This function takes one argument: the `instance_path` which it internally passes to the `Flask` constructor. Doing this change will make it easy to start the production server from the command line.
+
+1. Open `rgsapp.py` in your editor and select everything from the line `app = Flask(__name__, instance_relative_config=True)` all the way to the end of the file. 
+2. Press the TAB key. A modern editor should indent everything by a tab (works in Sublime and Notepad++).
+3. Modify the content near the top so that it looks like this:
+```python
+def create_app(instance_path = None):
+    if instance_path:
+        app = Flask(__name__, instance_path=instance_path, instance_relative_config=True)
+    else:
+        app = Flask(__name__, instance_relative_config=True)
+    
+    app.config.from_object('default_settings')
+    ...
+```
+* The syntax `instance_path = None` means that `instance_path` will be set to None if no argument is provided. This is the default arguments syntax in Python.
+* We check if `instance_path` has been provided, if it has, we pass it to the `Flask` constructor, otherwise we call `Flask` as we did before.
+4. Make sure you save the file
+5. Let's ensure that the flask development server still works with the app. We'll need to change `FLASK_APP` environment variable though:
+    ```sh 
+    export FLASK_APP="rgsapp.py:create_app()"
+    ```
+    This instructs flask to call `create_app` to retrieve the `app` instance.
+
+6. Run `flask run`, everything should still work normally. 7. Terminate the server with CTRL+C.
+
+Now we are ready for waitress. Add the following code to the end of `rgsapp.py`:
+
+```python
+if __name__ == "__main__":
+    from waitress import serve
+    import sys 
+
+    instance_path = sys.argv[1]
+    port = int(sys.argv[2])
+
+    app = create_app(instance_path)
+
+    serve(app, port=port)
+```
+* When you call a python script directly, like `python myscript.py`, the special `__name__` variable is set to `__main__`. But when you import the script, the name is set to the name of the script.
+* If this statement, we check if we are executing the script directly
+* If we are, we import the `serve` function from the `waitress` module
+* We accept two command line arguments: the instance path and the port number to listen to. Since port is a string containing a number, we apply the `int()` function to convert the string to a number.
+* We instantiate the app via `create_app`
+* Finally, we serve the app on the given port
+
+To run the production server, type:
+```sh
+python rgsapp.py /mnt/c/Users/Mohammad/Projects/webdev-course/rgs/instance 8080
+```
+* The instance path has to be absolute
+* We are listening here on port 8080
+
+Navigate in your browser to `localhost:8080` and you should see the app working normally. Voila! production server in one script.
 
 ## Reverse Proxy
 
