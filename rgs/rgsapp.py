@@ -177,4 +177,4 @@ if __name__ == "__main__":
 
     app = create_app(instance_path)
 
-    serve(app, port=port)
+    serve(app, url_prefix='rgs', port=port)

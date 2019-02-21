@@ -2247,7 +2247,7 @@ Annoyingly, Flask ignores `ENV` and `DEBUG` conifguration variables if they are 
 Before proceeding, make sure to stop the flask server and unset the `RGS_SETTINGS` environment variable.
 
 ## Instance Folders
-For deployment, it is a best to keep the configuration and  dynamic resources, such as the database and uploads, in one location. The same app code can then be used to host multiple deployments, with each deployment being located at a different folder. These dynamic app resources will then be kept out of source control.
+For deployment, it is a best to keep the configuration and  dynamic resources, such as the database and uploads, in one location. The same app code can then be used to host multiple deployments, with each deployment being located at a different folder.
 
 Flask has the concept of _instance folders_ which allow the user to specify the base path under which dynamic resources will be located. By default, the instance folder for our project is `instance` under `rgs`. We are not making use of this folder yet because we are just specifying the paths to our database and upload folders relative to the application, not the instance path. Let's change that.
 
@@ -2353,7 +2353,9 @@ def create_app(instance_path = None):
     ```
     This instructs flask to call `create_app` to retrieve the `app` instance.
 
-6. Run `flask run`, everything should still work normally. 7. Terminate the server with CTRL+C.
+6. Run `flask run`, everything should still work normally. 
+
+7. Terminate the server with CTRL+C.
 
 Now we are ready for waitress. Add the following code to the end of `rgsapp.py`:
 
@@ -2370,7 +2372,7 @@ if __name__ == "__main__":
     serve(app, port=port)
 ```
 * When you call a python script directly, like `python myscript.py`, the special `__name__` variable is set to `__main__`. But when you import the script, the name is set to the name of the script.
-* If this statement, we check if we are executing the script directly
+* We check if we are executing the script directly
 * If we are, we import the `serve` function from the `waitress` module
 * We accept two command line arguments: the instance path and the port number to listen to. Since port is a string containing a number, we apply the `int()` function to convert the string to a number.
 * We instantiate the app via `create_app`
@@ -2387,7 +2389,65 @@ Navigate in your browser to `localhost:8080` and you should see the app working 
 
 ## Reverse Proxy
 
+You can certainly use `waitress` to publically host the app on port 80; however, what if you have multiple apps on a web server, each one with its own `waitress`? There are two solutions:
 
+1. Give each app a different port number, so app A would have `localhost:8080`, and app B would have `localhost:8090` and so on.
+2. Map subdirectories in the URL to the server, so `localhost/a` would map to app A, and `localhost/b` would map to app B.
 
+Solution #1 is easy to implement: just run each app with a different port number. But it is also ugly to expose port number configuration to the public. Instead, we'll use soution #2 which requires a _reverse proxy_.
 
+![reverse proxy](https://httpd.apache.org/docs/2.4/images/reverse-proxy-arch.png)
 
+A reverse proxy is a server application which recieves incoming requests from the external network and maps them to internal requests to local servers. Suppose that the _local_ server is running at `http://localhost:8080` and that the webserver is listening at `http://mydomain.com`, then at a minimum the reverse proxy does two things:
+
+* Rewrite incoming requests to `http://mydomain.com/subfolder` to `http://localhost:8080/subfolder`.
+* When the local application issues a redirect to `http://localhost:8080/another_subfolder`, the reverse proxy will rewrite back to `http://mydomain.com/another_subfolder`
+
+Reverse proxies also have the advantage of allowing local servers to worry about serving pages while taking care of details such as HTTPS connections. Waitress for example does not support HTTPS, but if you run behind a reverse proxy, it can support HTTPS websites.
+
+These instructions are limited to Linux (Ubuntu) because you really shouldn't be deploying on anything else:
+
+1. Install Apache web server
+```sh
+$ sudo apt install apache2
+```
+
+2. Allow it through the filewall on port 80:
+```sh
+$ sudo ufw allow in "Apache"
+```
+
+3. Enable rewrite and proxy Apache mods:
+```sh
+sudo a2enmod rewrite
+sudo a2enmod proxy
+sudo a2enmod proxy_http
+```
+
+4. Modify the configuration file at `/etc/apache2/sites-available/000-default.conf` (you need sudo privilege) by adding the following lines under the `DocumentRoot` line:
+```
+ProxyRequests Off
+ProxyPreserveHost On
+RewriteEngine on
+
+RewriteRule ^/rgs$ /rgs/ [R]
+ProxyPass "/rgs/" "http://0.0.0.0:8080"
+ProxyPassReverse "/rgs/" "http://0.0.0.0:8080"
+```
+
+5. Restart apache
+```sh
+sudo systemctl restart apache2
+```
+
+6. Modify the last line in `rgsapp.py`:
+```python
+serve(app, url_prefix='rgs', port=port)
+```
+
+7. Launch waitress:
+```sh
+python rgsapp.py /mnt/c/Users/Mohammad/Projects/webdev-course/rgs/instance 8080
+```
+
+You should now be able to access `http://localhost/rgs` and it would correctly point to our local server. Neat huh?
